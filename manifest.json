@@ -1,0 +1,16 @@
+{
+  "name": "Exoskeleton Firmware",
+  "version": "d0ee616 \u00b7 S3 autodetect (public build, telemetry off)",
+  "new_install_prompt_erase": false,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "exo-fw-d0ee616-esp32s3.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}

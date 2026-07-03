@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Exoskeleton Firmware Flasher</title>
+
+  <!-- ESP Web Tools v10 (WebSerial-based flasher). Self-hosted CDN module, no other externals. -->
+  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #ffffff;
+      --ink: #1e293b;
+      --muted: #64748b;
+      --brand: #2563eb;
+      --brand-dark: #1d4ed8;
+      --ok: #16a34a;
+      --warn-bg: #fef9c3;
+      --warn-border: #eab308;
+      --req-bg: #eff6ff;
+      --req-border: #3b82f6;
+      --code-bg: #0f172a;
+      --code-ink: #e2e8f0;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.55;
+      color: var(--ink);
+      background: linear-gradient(160deg, #0f172a 0%, #1e293b 55%, #334155 100%);
+      background-attachment: fixed;
+      padding: 32px 16px 64px;
+    }
+
+    .wrap {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    header {
+      text-align: center;
+      color: #f8fafc;
+      margin-bottom: 24px;
+    }
+
+    header h1 {
+      font-size: clamp(1.5rem, 4vw, 2.1rem);
+      margin: 0 0 8px;
+      letter-spacing: -0.02em;
+    }
+
+    header p {
+      margin: 0 auto;
+      max-width: 34rem;
+      color: #cbd5e1;
+      font-size: 1rem;
+    }
+
+    .card {
+      background: var(--panel);
+      border-radius: 16px;
+      padding: 24px;
+      margin: 18px 0;
+      box-shadow: 0 10px 30px rgba(2, 6, 23, 0.28);
+    }
+
+    h2 {
+      font-size: 1.15rem;
+      margin: 0 0 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    label.field-label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 6px;
+      font-size: 0.95rem;
+    }
+
+    select#version {
+      width: 100%;
+      padding: 12px 14px;
+      font-size: 1rem;
+      border: 1.5px solid #cbd5e1;
+      border-radius: 10px;
+      background: #f8fafc;
+      color: var(--ink);
+      cursor: pointer;
+      -webkit-appearance: menulist;
+      appearance: menulist;
+    }
+
+    select#version:focus {
+      outline: 3px solid rgba(37, 99, 235, 0.35);
+      border-color: var(--brand);
+    }
+
+    .flash-row {
+      text-align: center;
+      margin-top: 20px;
+    }
+
+    /* Styled button that lives in the install-button's default slot */
+    button.flash-btn {
+      appearance: none;
+      border: none;
+      cursor: pointer;
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #ffffff;
+      background: var(--brand);
+      padding: 14px 28px;
+      border-radius: 12px;
+      box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
+      transition: background 0.15s ease, transform 0.05s ease;
+    }
+    button.flash-btn:hover { background: var(--brand-dark); }
+    button.flash-btn:active { transform: translateY(1px); }
+
+    .unsupported {
+      background: #fee2e2;
+      border: 1.5px solid #ef4444;
+      color: #991b1b;
+      padding: 14px 16px;
+      border-radius: 10px;
+      text-align: left;
+      font-size: 0.95rem;
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 0.88rem;
+      margin-top: 12px;
+    }
+
+    /* Requirements box — friendly & prominent */
+    .requirements {
+      background: var(--req-bg);
+      border: 1.5px solid var(--req-border);
+      border-radius: 14px;
+    }
+    .requirements h2 { color: var(--brand-dark); }
+    .requirements ul { margin: 0; padding-left: 1.25rem; }
+    .requirements li { margin: 10px 0; }
+    .requirements strong { color: var(--ink); }
+
+    .badge {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #dcfce7;
+      color: #166534;
+      vertical-align: middle;
+    }
+    .badge.no {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .confirm {
+      background: #f0fdf4;
+      border: 1.5px solid var(--ok);
+      border-radius: 14px;
+    }
+    .confirm h2 { color: #15803d; }
+
+    pre.boot {
+      background: var(--code-bg);
+      color: var(--code-ink);
+      padding: 14px 16px;
+      border-radius: 10px;
+      overflow-x: auto;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 0.82rem;
+      line-height: 1.5;
+      margin: 12px 0;
+      white-space: pre;
+    }
+
+    .troubleshoot ul { margin: 0; padding-left: 1.25rem; }
+    .troubleshoot li { margin: 9px 0; }
+
+    kbd {
+      background: #1e293b;
+      color: #f8fafc;
+      border-radius: 5px;
+      padding: 1px 7px;
+      font-family: ui-monospace, monospace;
+      font-size: 0.82rem;
+    }
+
+    footer {
+      text-align: center;
+      color: #94a3b8;
+      font-size: 0.8rem;
+      margin-top: 28px;
+    }
+
+    a { color: var(--brand); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Exoskeleton Firmware Flasher</h1>
+      <p>
+        Flash an exoskeleton unit straight from your browser — no downloads, no
+        command line. Plug in over USB, pick a version, and click one button.
+      </p>
+    </header>
+
+    <!-- ============ FLASH CARD ============ -->
+    <section class="card">
+      <h2>Flash a unit</h2>
+
+      <label class="field-label" for="version">Firmware version</label>
+      <select id="version" aria-label="Firmware version"></select>
+
+      <div class="flash-row">
+        <!--
+          The manifest attribute is set from JS (see FIRMWARE_VERSIONS below).
+          The default-slot <button> is what testers click; the "unsupported"
+          slot shows automatically when the browser can't do WebSerial.
+        -->
+        <esp-web-install-button id="installer" manifest="./manifest.json">
+          <button class="flash-btn" slot="activate">Connect &amp; Flash</button>
+          <div slot="unsupported" class="unsupported">
+            <strong>This browser can't flash.</strong> WebSerial isn't available
+            here. Please open this page in <strong>Google Chrome</strong> or
+            <strong>Microsoft Edge</strong> on a desktop computer (see
+            requirements below).
+          </div>
+          <div slot="not-allowed" class="unsupported">
+            <strong>WebSerial is blocked.</strong> This page must be served over
+            <strong>https://</strong> (GitHub Pages is fine). If you opened the
+            file directly from disk, that won't work.
+          </div>
+        </esp-web-install-button>
+        <p class="hint">
+          Calibration is preserved — flashing does <strong>not</strong> erase the
+          unit's per-unit settings stored in flash.
+        </p>
+      </div>
+    </section>
+
+    <!-- ============ REQUIREMENTS ============ -->
+    <section class="card requirements">
+      <h2>Before you start — please read</h2>
+      <ul>
+        <li>
+          <strong>Use the right browser.</strong>
+          <span class="badge">Chrome</span>
+          <span class="badge">Edge</span> on a desktop/laptop — or Chrome 148+ on
+          Android with a USB-C OTG cable.
+          <br />
+          <span class="badge no">Safari</span>
+          <span class="badge no">iPhone / iPad</span>
+          <span class="badge no">Firefox</span> will <strong>not</strong> work.
+        </li>
+        <li>
+          <strong>Use a DATA USB cable</strong> — not a charge-only cable. Many
+          cheap cables only carry power and the unit will never appear. Plug the
+          exoskeleton unit into this computer.
+        </li>
+        <li>
+          <strong>Then click Connect &amp; Flash</strong>, choose the serial port
+          in the browser's pop-up prompt, and wait about
+          <strong>30–60 seconds</strong>. Don't unplug it while it's flashing.
+        </li>
+      </ul>
+    </section>
+
+    <!-- ============ CONFIRM SUCCESS ============ -->
+    <section class="card confirm">
+      <h2>How to confirm it worked</h2>
+      <p>
+        When flashing finishes, click <strong>“Logs &amp; Console”</strong> in the
+        dialog and watch the boot messages. You've succeeded if you see
+        <em>either</em> of these lines:
+      </p>
+      <pre class="boot">IMU LH up (V3.1 single: cs=17, rst/wake0 via PCA9534@0x20, no-INT, accel+gyro+rotvec)
+IMU LH up (Version#1 single: cs=17, rst=8 wake=18 direct-GPIO, no-INT, accel+gyro+rotvec)</pre>
+      <p class="hint">
+        You'll only ever see one of them — the firmware
+        <strong>auto-detects which board revision it's running on</strong> (V3.1 or
+        Version #1) and configures the IMU accordingly. The <em>same</em> image
+        works on both board revisions, so you don't need to know which one you have.
+      </p>
+    </section>
+
+    <!-- ============ TROUBLESHOOTING ============ -->
+    <section class="card troubleshoot">
+      <h2>Troubleshooting</h2>
+      <ul>
+        <li>
+          <strong>The port doesn't appear in the pop-up?</strong> Try a different
+          USB cable (must be a data cable) and a different USB port.
+        </li>
+        <li>
+          <strong>The unit disconnects and reconnects on its own?</strong> A
+          factory-blank board can briefly drop off and rejoin the USB bus — that's
+          normal. Just try Connect &amp; Flash again.
+        </li>
+        <li>
+          <strong>A badly-flashed unit won't connect at all?</strong> Hold the
+          <kbd>BOOT</kbd> button on the unit while you plug it in (keep it held
+          until the port appears), then release and click Connect &amp; Flash.
+        </li>
+      </ul>
+    </section>
+
+    <footer>
+      Exoskeleton Firmware Flasher · powered by ESP Web Tools · works over WebSerial in Chrome/Edge
+    </footer>
+  </div>
+
+  <script>
+    // ==========================================================================
+    //  FIRMWARE VERSIONS
+    //  To add a future version: add another { label, manifest } entry to this
+    //  array. The newest/most-recommended version should be listed FIRST — it is
+    //  selected by default. Each manifest is a separate .json file next to this
+    //  page (see manifest.json for the format).
+    // ==========================================================================
+    const FIRMWARE_VERSIONS = [
+      {
+        label: "d0ee616 — S3 board autodetect (V3.1 + Version #1)",
+        manifest: "./manifest.json"
+      }
+      // ,{ label: "next version …", manifest: "./manifest-nextversion.json" }
+    ];
+
+    const select = document.getElementById("version");
+    const installer = document.getElementById("installer");
+
+    // Populate the dropdown from the array above.
+    FIRMWARE_VERSIONS.forEach((v, i) => {
+      const opt = document.createElement("option");
+      opt.value = String(i);
+      opt.textContent = v.label;
+      select.appendChild(opt);
+    });
+
+    // Point the install button at the manifest for the chosen version.
+    function applyManifest() {
+      const chosen = FIRMWARE_VERSIONS[Number(select.value)] || FIRMWARE_VERSIONS[0];
+      installer.setAttribute("manifest", chosen.manifest);
+    }
+
+    select.addEventListener("change", applyManifest);
+    applyManifest(); // set initial manifest to match the default-selected option
+  </script>
+</body>
+</html>
