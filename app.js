@@ -13,7 +13,11 @@ import { ESPLoader, Transport } from "./vendor/esptool-js/bundle.js";
 // Config
 // ---------------------------------------------------------------------------
 const EXPECTED_CHIP = "ESP32-S3";
-const FLASH_BAUD = 921600;   // flashing speed; native USB ignores it, UART bridges use it
+// Keep flashing at 115200 so esptool-js never switches baud during connect. These
+// boards use the ESP32-S3 native USB, which ignores the baud number and runs at full
+// USB speed regardless - so 115200 is just as fast and avoids a "port lost" on the
+// baud change. Only raise this if a build ever ships on a real UART bridge.
+const FLASH_BAUD = 115200;
 const APP_BAUD = 115200;     // serial monitor speed for reading the boot log
 const FLASH_OFFSET = 0;      // merged image is written whole at 0 (bootloader..www)
 
@@ -128,6 +132,7 @@ async function connect() {
     updateFlashEnabled();
   } catch (e) {
     logLine("Connect failed: " + (e.message || e), "err");
+    logLine("Try: hold the BOOT button while clicking Connect (release after the port picker), close any other program using the port (Arduino IDE, idf.py monitor, PuTTY), and use a data USB cable.", "warn");
     setStatus("Connect failed", "err");
     await hardCleanup();
   } finally {
