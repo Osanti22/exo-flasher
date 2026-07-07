@@ -261,8 +261,9 @@ async function flash() {
 
     setProgress(1, "Done");
     setStatus("Flashed OK", "ok");
-    logLine("Flash complete. Click Reset board to run it, or open the Logs monitor to watch the boot log.", "ok");
-    els.flashBtn.textContent = "Flash again";
+    logLine("Flash complete. Resetting into the new firmware and starting the log...", "ok");
+    flashing = false;                 // done writing; the auto-reset/log step follows
+    try { await autoResetAndLog(); } catch (e2) { logLine("Auto reset/log note: " + (e2.message || e2), "dim"); }
   } catch (e) {
     logLine("Flash failed: " + (e.message || e), "err");
     setStatus("Flash failed", "err");
@@ -271,6 +272,24 @@ async function flash() {
     flashing = false;
     updateFlashEnabled();
   }
+}
+
+// After a successful flash: reset the board into the new firmware and start the
+// log automatically. If a separate monitor is already open on another port, just
+// reset (that monitor shows the reboot). Otherwise move the flash port into the
+// log monitor, reset, and stream the boot log.
+async function autoResetAndLog() {
+  const flashPort = port;
+  if (!flashPort) return;
+  if (logOpen && logPort && logPort !== flashPort) {
+    logLine("Resetting into the new firmware...", "dim");
+    try { await pulseResetPort(flashPort); } catch (e) { logLine("Reset note: " + (e.message || e), "dim"); }
+    await hardCleanup();
+    setStatus("Flashed - running", "ok");
+    return;
+  }
+  await beginLog(flashPort, true);
+  setStatus("Flashed - logging", "ok");
 }
 
 // ---------------------------------------------------------------------------
@@ -285,13 +304,18 @@ async function openLogs() {
     logLine("No log port selected.", "warn");
     return;
   }
-  // If the flash connection holds this same device, gently release it so we can
-  // log on it. A different device is left alone (flash + log can coexist).
-  if (port && chosen === port) {
-    logLine("This port is used for flashing - closing the flash connection so it can log.", "dim");
-    await hardCleanup();
+  await beginLog(chosen, false);   // manual open: just watch, do not reset
+}
+
+// Open a serial port as the log monitor and stream it until Close. If the flash
+// connection holds this same device, release it first. With reset=true, pulse the
+// board into the app after the reader is up, so the boot log is caught.
+async function beginLog(p, reset) {
+  if (port && p === port) {
+    logLine("Using the flashing port for logs - closing the flash connection first.", "dim");
+    await hardCleanup();   // closes the port; p stays a valid SerialPort to reopen
   }
-  logPort = chosen;
+  logPort = p;
   const baud = parseInt(els.logBaud.value, 10) || 115200;
   try {
     await logPort.open({ baudRate: baud });
@@ -299,14 +323,20 @@ async function openLogs() {
     logLine("Could not open the log port: " + (e.message || e) +
       " - another program may be using it (idf.py monitor, Arduino IDE, PuTTY).", "err");
     logPort = null;
-    return;
+    return false;
   }
   logOpen = true;
   els.logOpenBtn.textContent = "Close";
   els.logResetBtn.hidden = false;
   els.logBaud.disabled = true;
   logLine(`--- log monitor open (${baud} baud) - watching for '${IMU_OK}' ---`, "dim");
-  streamLogs();
+  streamLogs();                      // start reading before any reset
+  if (reset) {
+    await sleep(80);
+    logLine("Resetting into the app...", "dim");
+    try { await pulseResetPort(logPort); } catch (e) { logLine("Reset note: " + (e.message || e), "dim"); }
+  }
+  return true;
 }
 
 async function closeLogs() {

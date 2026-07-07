@@ -14,7 +14,7 @@ The flasher drives `esptool-js` directly (vendored, pinned) so the page owns the
 
 - `index.html` - page shell only (markup + element ids).
 - `styles.css` - all styling (dark, card-based).
-- `app.js` - ES module, the whole app: connect + flash a user-picked `.bin`, device info, and an independent Logs monitor. Two separate serial ports: the flash port (esptool) and the Logs port (its own `requestPort`), so flashing and log-watching don't share a connection.
+- `app.js` - ES module, the whole app: connect + flash a user-picked `.bin`, device info, and an independent Logs monitor. Two separate serial ports: the flash port (esptool) and the Logs port (its own `requestPort`), so flashing and log-watching don't share a connection. After a successful flash it auto-resets the board and auto-opens the Logs monitor (`autoResetAndLog` -> `beginLog`); on a single-port board the flash port is handed to the monitor, on two ports an already-open monitor just shows the reboot.
 - `vendor/esptool-js/bundle.js` - vendored self-contained ESM build of esptool-js (no runtime CDN). `VERSION.txt` says which version and how to bump it.
 - `build-image.sh` - merges an ESP-IDF build into one `.bin` to hand to a client. Does not host or commit anything.
 - `.gitignore` - blocks `*.bin` so a firmware image can never be committed.

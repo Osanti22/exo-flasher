@@ -59,9 +59,9 @@ you know can transfer data.
 
 ### 4. Confirm it worked
 
-When flashing finishes, in the **Logs and console** panel click **Open** and pick the
-board's serial port, then click **Reset board** (in the Connect card) or **Reset** in
-the Logs panel. The board reboots into the new firmware and prints its boot banner.
+When flashing finishes, the board resets into the new firmware on its own and the
+**Logs and console** panel starts showing its boot log automatically - you do not have
+to press anything. (You can also open the Logs monitor by hand any time with **Open**.)
 
 Look for the **IMU boot line**. It will be one of these two, depending on the
 hardware revision the board auto-detects:
