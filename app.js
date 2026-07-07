@@ -105,14 +105,19 @@ const terminal = {
   write(data) { logLine(data, "dim"); },
 };
 
-// Pulse only the reset line (RTS) to reboot a board into the app - the same
-// "Hard resetting via RTS pin" esptool uses. We must NOT touch DTR: on the
-// ESP32-S3 native USB-Serial-JTAG, DTR drives GPIO0, and sending DTR events makes
-// the chip fall into download mode ("waiting for download") instead of running.
+// Reboot a board into the app, ESP32-S3 native USB-Serial-JTAG style. This matches
+// what esptool.py does for a hard reset, and it matters HOW:
+//   1. Settle DTR low on its own first (GPIO0 high = run) and let it settle. After
+//      port.open() WebSerial leaves DTR asserted; with DTR==RTS the USB-JTAG reset
+//      logic cancels, which is why a lone RTS toggle does nothing.
+//   2. Then pulse ONLY RTS (EN low -> high). Changing DTR and RTS in the same message
+//      looks like the "enter download" pattern, so we keep the edges separate.
 async function pulseResetPort(p) {
-  await p.setSignals({ requestToSend: true });   // EN low - hold in reset
+  await p.setSignals({ dataTerminalReady: false });                        // GPIO0 high (run); settle
+  await sleep(60);
+  await p.setSignals({ dataTerminalReady: false, requestToSend: true });   // EN low (reset)
   await sleep(100);
-  await p.setSignals({ requestToSend: false });  // EN high - release, boots the app
+  await p.setSignals({ dataTerminalReady: false, requestToSend: false });  // EN high -> run the app
 }
 
 // ---------------------------------------------------------------------------
