@@ -110,34 +110,60 @@ async function connect() {
     logLine("No port selected.", "warn");
     return;
   }
+  // Auto-reset into the bootloader, no button press. esptool-js picks the reset
+  // for us: a native USB-Serial-JTAG board (PID 0x1001) gets the USB-JTAG reset,
+  // anything else gets the classic DTR/RTS auto-reset - same as esptool.py's
+  // default-reset. We then try a small ladder so custom boards work too:
+  //   - native USB (0x1001): default (USB-JTAG) -> no_reset (if user held BOOT)
+  //   - bridge / custom PID:  default (classic) -> usb_reset (native, odd PID) -> no_reset
+  const info = (port.getInfo && port.getInfo()) || {};
+  const isNativeUsbJtag = info.usbProductId === 0x1001;
+  logLine(
+    `Port VID 0x${(info.usbVendorId || 0).toString(16)} PID 0x${(info.usbProductId || 0).toString(16)}` +
+      (isNativeUsbJtag ? " - ESP32-S3 native USB-JTAG (auto reset)" : " - UART bridge / custom (auto reset via DTR/RTS)"),
+    "dim"
+  );
+  const resetModes = isNativeUsbJtag
+    ? ["default_reset", "no_reset"]
+    : ["default_reset", "usb_reset", "no_reset"];
+
   setStatus("Connecting...", "busy");
   els.connectBtn.disabled = true;
-  try {
-    transport = new Transport(port, false);
-    esploader = new ESPLoader({
-      transport,
-      baudrate: FLASH_BAUD,
-      terminal,
-      debugLogging: false,
-    });
-    const chipDesc = await esploader.main();   // resets, detects, loads stub, syncs
-    if (!esploader.chip.CHIP_NAME || !esploader.chip.CHIP_NAME.includes("ESP32-S3")) {
-      logLine(`Warning: connected chip is ${esploader.chip.CHIP_NAME}, expected ${EXPECTED_CHIP}.`, "warn");
+  let ok = false, lastErr = null;
+  for (const mode of resetModes) {
+    try {
+      logLine(`Connecting (reset: ${mode.replace(/_/g, " ")})...`, "dim");
+      transport = new Transport(port, false);
+      esploader = new ESPLoader({ transport, baudrate: FLASH_BAUD, terminal, debugLogging: false });
+      const chipDesc = await esploader.main(mode);   // resets, detects, loads stub, syncs
+      if (!esploader.chip.CHIP_NAME || !esploader.chip.CHIP_NAME.includes("ESP32-S3")) {
+        logLine(`Warning: connected chip is ${esploader.chip.CHIP_NAME}, expected ${EXPECTED_CHIP}.`, "warn");
+      }
+      await readDeviceInfo(chipDesc);
+      ok = true;
+      break;
+    } catch (e) {
+      lastErr = e;
+      logLine(`Reset "${mode.replace(/_/g, " ")}" did not connect: ${e.message || e}`, "dim");
+      try { await transport.disconnect(); } catch (_) {}
+      transport = null;
+      esploader = null;
     }
-    await readDeviceInfo(chipDesc);
+  }
+
+  if (ok) {
     connected = true;
     setStatus("Connected", "ok");
     els.disconnectBtn.hidden = false;
     els.connectBtn.textContent = "Reconnect";
     updateFlashEnabled();
-  } catch (e) {
-    logLine("Connect failed: " + (e.message || e), "err");
-    logLine("Try: hold the BOOT button while clicking Connect (release after the port picker), close any other program using the port (Arduino IDE, idf.py monitor, PuTTY), and use a data USB cable.", "warn");
+  } else {
+    logLine("Connect failed: " + (lastErr && (lastErr.message || lastErr)), "err");
+    logLine("Auto-reset did not work. If this is a custom board with no auto-reset circuit, hold BOOT while clicking Connect (release after the port picker). Also close any other program using the port (idf.py monitor, Arduino IDE, PuTTY) and use a data USB cable.", "warn");
     setStatus("Connect failed", "err");
     await hardCleanup();
-  } finally {
-    els.connectBtn.disabled = false;
   }
+  els.connectBtn.disabled = false;
 }
 
 async function readDeviceInfo(chipDesc) {
