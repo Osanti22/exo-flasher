@@ -60,7 +60,7 @@ const els = {};
   "fileInput", "fileDrop", "fileMeta",
   "flashBtn",
   "progressWrap", "progressBar", "progressPhase", "progressPct",
-  "logOpenBtn", "logResetBtn", "logBaud", "clearLogBtn", "copyLogBtn", "console",
+  "logOpenBtn", "logResetBtn", "logBaud", "clearLogBtn", "copyLogBtn", "saveLogBtn", "console",
 ].forEach((id) => (els[id] = $(id)));
 
 function setStatus(text, kind) {
@@ -398,6 +398,21 @@ async function monitorLoop() {
   }
 }
 
+// Save the console to a .txt file the user can download.
+function saveLog() {
+  const text = els.console.textContent;
+  if (!text.trim()) { logLine("Nothing to save yet.", "warn"); return; }
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `exo-log-${stamp}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 // When the board drops off USB on reset, cancel the current read so the monitor
 // loop unblocks and moves to reopening the port.
 function onSerialDisconnect(e) {
@@ -470,6 +485,7 @@ function init() {
   navigator.serial.addEventListener("disconnect", onSerialDisconnect);
   els.clearLogBtn.addEventListener("click", () => { els.console.textContent = ""; });
   els.copyLogBtn.addEventListener("click", () => navigator.clipboard.writeText(els.console.textContent));
+  els.saveLogBtn.addEventListener("click", saveLog);
 
   window.addEventListener("beforeunload", () => {
     try { hardCleanup(); } catch (e) {}
