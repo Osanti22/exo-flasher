@@ -334,10 +334,17 @@ IMU LH up (Version#1 single: cs=17, rst=8 wake=18 direct-GPIO, no-INT, accel+gyr
     // ==========================================================================
     const FIRMWARE_VERSIONS = [
       {
-        label: "d0ee616 — S3 board autodetect (V3.1 + Version #1)",
+        label: "d0ee616 — S3 autodetect (V3.1 & v2.6) — recommended",
         manifest: "./manifest.json"
+      },
+      {
+        label: "develop 2.2.0 — v2.6 boards (ship) · no IMU on V3.1",
+        manifest: "./manifest-develop-ship.json"
+      },
+      {
+        label: "develop 2.2.0 — sample #2 (v2.6, no-WAKE IMU)",
+        manifest: "./manifest-develop-sample2.json"
       }
-      // ,{ label: "next version …", manifest: "./manifest-nextversion.json" }
     ];
 
     const select = document.getElementById("version");
