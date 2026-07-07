@@ -24,7 +24,14 @@ const EXPECTED_CHIP = "ESP32-S3";
 // USB speed regardless - so 115200 is just as fast and avoids a "port lost" on the
 // baud change. Only raise this if a build ever ships on a real UART bridge.
 const FLASH_BAUD = 115200;
-const FLASH_OFFSET = 0;      // merged image is written whole at 0 (bootloader..www)
+const FLASH_OFFSET = 0;      // Recovery: merged image written whole at 0 (bootloader..www)
+
+// Update-mode segment offsets (fixed partition layout). nvs at 0x9000 is NOT in any
+// segment, so an Update flash never erases calibration or WiFi.
+const OTADATA_OFFSET = 0xf000;
+const APP_OFFSET = 0x20000;
+const WWW_OFFSET = 0x830000;
+const OTADATA_MAX = 0x2000;   // ota_data partition is 2 sectors (8 KB); reject anything bigger
 
 // The "IMU LH up" lines the firmware prints on a good boot. Success is one of these.
 const IMU_OK = "IMU LH up";
@@ -40,7 +47,11 @@ let transport = null;     // esptool-js Transport wrapping the flash port
 let esploader = null;     // esptool-js loader (held open while connected)
 let connected = false;    // true once we are synced with the bootloader
 let flashing = false;
-let localFile = null;     // the .bin chosen from disk
+let flashMode = "update"; // "update" (keep nvs) | "recovery" (full merged image)
+let localFile = null;     // Recovery: the merged .bin
+let appImg = null;        // Update: app image     -> 0x20000 (required)
+let otadataImg = null;    // Update: ota_data image -> 0xf000 (required)
+let wwwImg = null;        // Update: GUI image      -> 0x830000 (optional)
 
 // Log port (independent serial monitor)
 let logPort = null;
@@ -57,6 +68,8 @@ const els = {};
   "unsupported", "app", "statusPill",
   "connectBtn", "disconnectBtn", "resetBtn",
   "deviceInfo", "diChip", "diRev", "diMac", "diFlash", "diFeatures",
+  "modeUpdate", "modeRecovery", "modeHint", "modeCallout", "updatePanel", "recoveryPanel",
+  "appFile", "otadataFile", "wwwFile", "appFileName", "otadataFileName", "wwwFileName",
   "fileInput", "fileDrop", "fileMeta",
   "flashBtn",
   "progressWrap", "progressBar", "progressPhase", "progressPct",
@@ -111,7 +124,45 @@ function pickFile(file) {
 }
 
 function updateFlashEnabled() {
-  els.flashBtn.disabled = !(connected && localFile && !flashing);
+  const ready = flashMode === "recovery" ? !!localFile : (!!appImg && !!otadataImg);
+  els.flashBtn.disabled = !(connected && ready && !flashing);
+}
+
+function setMode(mode) {
+  flashMode = mode;
+  els.modeUpdate.classList.toggle("active", mode === "update");
+  els.modeRecovery.classList.toggle("active", mode === "recovery");
+  els.updatePanel.hidden = mode !== "update";
+  els.recoveryPanel.hidden = mode !== "recovery";
+  if (mode === "update") {
+    els.modeHint.textContent =
+      "Writes the app and OTA data (and the GUI if you add it) as separate segments. " +
+      "Keeps calibration and WiFi. Use this for normal updates.";
+    els.modeCallout.className = "callout ok";
+    els.modeCallout.innerHTML =
+      "<span class='ic'>🛡️</span><span>Calibration and WiFi are <strong>preserved</strong> - " +
+      "the nvs partition at 0x9000 is never touched.</span>";
+  } else {
+    els.modeHint.textContent =
+      "Writes one merged image over the whole flash. Rebuilds everything and ERASES " +
+      "calibration and WiFi. Only for a bricked or fresh unit.";
+    els.modeCallout.className = "callout warn";
+    els.modeCallout.innerHTML =
+      "<span class='ic'>⚠️</span><span>Recovery <strong>erases</strong> calibration and WiFi " +
+      "(the nvs partition). Only use it on a bricked or fresh unit.</span>";
+  }
+  updateFlashEnabled();
+}
+
+// Bind a file input to a state setter and its filename label.
+function bindFileInput(inputEl, nameEl, setter) {
+  inputEl.addEventListener("change", (e) => {
+    const f = e.target.files[0] || null;
+    setter(f);
+    nameEl.textContent = f ? `${f.name} (${(f.size / 1024).toFixed(1)} KB)` : "no file";
+    nameEl.classList.toggle("set", !!f);
+    updateFlashEnabled();
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -233,8 +284,51 @@ function setProgress(fraction, phase) {
   if (phase) els.progressPhase.textContent = phase;
 }
 
+const hex = (n) => "0x" + n.toString(16);
+
+// Build the list of {data, address} segments to write, and validate them, per mode.
+// Recovery: one merged image at 0x0. Update: separate segments that skip nvs (0x9000).
+async function buildFileArray() {
+  if (flashMode === "recovery") {
+    const data = new Uint8Array(await localFile.arrayBuffer());
+    if (data.length === 0) throw new Error("The firmware file is empty.");
+    if (data[0] !== 0xe9) {
+      logLine("Warning: merged image does not start with 0xE9 (ESP image magic). Is this a full image for offset 0?", "warn");
+    }
+    return [{ data, address: FLASH_OFFSET }];
+  }
+  // Update mode: ota_data (0xf000), app (0x20000), optional www (0x830000).
+  const app = new Uint8Array(await appImg.arrayBuffer());
+  const ota = new Uint8Array(await otadataImg.arrayBuffer());
+  if (app.length === 0) throw new Error("The app file is empty.");
+  if (app[0] !== 0xe9) {
+    throw new Error("App image does not start with 0xE9 (ESP image magic). Is this exoskeleton_main_firmware.bin?");
+  }
+  if (ota.length === 0 || ota.length > OTADATA_MAX) {
+    throw new Error(`OTA data image is ${ota.length} bytes; expected the small init image (1..${OTADATA_MAX} bytes). Is this ota_data_initial.bin?`);
+  }
+  const arr = [
+    { data: ota, address: OTADATA_OFFSET },   // 0xf000 - must be present, or the app slot may be ignored
+    { data: app, address: APP_OFFSET },       // 0x20000
+  ];
+  if (wwwImg) {
+    const www = new Uint8Array(await wwwImg.arrayBuffer());
+    if (www.length > 0) arr.push({ data: www, address: WWW_OFFSET });   // 0x830000
+  }
+  return arr;
+}
+
 async function flash() {
-  if (!connected || flashing || !localFile) return;
+  if (!connected || flashing) return;
+  if (flashMode === "recovery" && !localFile) return;
+  if (flashMode === "update" && !(appImg && otadataImg)) return;
+
+  if (flashMode === "recovery" &&
+      !window.confirm("Recovery mode writes a full image and ERASES calibration and WiFi " +
+        "(the nvs partition). Only use it on a bricked or fresh unit.\n\nContinue?")) {
+    return;
+  }
+
   flashing = true;
   els.flashBtn.disabled = true;
   els.progressWrap.hidden = false;
@@ -242,22 +336,31 @@ async function flash() {
   setProgress(0, "Reading firmware");
 
   try {
-    const data = new Uint8Array(await localFile.arrayBuffer());
-    if (data.length === 0) throw new Error("Firmware file is empty.");
-    if (data[0] !== 0xe9) {
-      logLine("Warning: image does not start with 0xE9 (ESP image magic). Is this a merged image for offset 0?", "warn");
+    const fileArray = await buildFileArray();
+    const sizes = fileArray.map((f) => f.data.length);
+    const totalAll = sizes.reduce((a, b) => a + b, 0) || 1;
+
+    if (flashMode === "recovery") {
+      logLine("Recovery mode - writing one merged image at 0x0 (this erases nvs / calibration):", "warn");
+    } else {
+      logLine("Update mode - writing segments, nvs at 0x9000 left untouched:", "dim");
     }
-    logLine(`Flashing ${localFile.name} (${(data.length / 1048576).toFixed(2)} MB) at offset 0x0 (erase off, calibration preserved).`, "dim");
+    fileArray.forEach((f) => logLine(`  ${hex(f.address).padEnd(9)} ${(f.data.length / 1024).toFixed(1)} KB`, "dim"));
     setProgress(0, "Erasing and writing");
 
     await esploader.writeFlash({
-      fileArray: [{ data, address: FLASH_OFFSET }],
+      fileArray,
       flashMode: "keep",
       flashFreq: "keep",
       flashSize: "keep",
       eraseAll: false,
       compress: true,
-      reportProgress: (_i, written, total) => setProgress(written / total, "Writing"),
+      reportProgress: (i, written, total) => {
+        const frac = total ? written / total : 0;
+        const before = sizes.slice(0, i).reduce((a, b) => a + b, 0);
+        setProgress((before + sizes[i] * frac) / totalAll,
+          `Writing ${i + 1}/${fileArray.length} at ${hex(fileArray[i].address)}`);
+      },
     });
 
     setProgress(1, "Done");
@@ -469,6 +572,12 @@ function init() {
   els.resetBtn.addEventListener("click", resetBoard);
   els.flashBtn.addEventListener("click", flash);
 
+  els.modeUpdate.addEventListener("click", () => setMode("update"));
+  els.modeRecovery.addEventListener("click", () => setMode("recovery"));
+  bindFileInput(els.appFile, els.appFileName, (f) => (appImg = f));
+  bindFileInput(els.otadataFile, els.otadataFileName, (f) => (otadataImg = f));
+  bindFileInput(els.wwwFile, els.wwwFileName, (f) => (wwwImg = f));
+
   els.fileInput.addEventListener("change", (e) => pickFile(e.target.files[0]));
   ["dragover", "dragenter"].forEach((ev) =>
     els.fileDrop.addEventListener(ev, (e) => { e.preventDefault(); els.fileDrop.classList.add("drag"); })
@@ -492,6 +601,7 @@ function init() {
     try { closeLogs(); } catch (e) {}
   });
 
+  setMode("update");
   setStatus("Disconnected", "");
 }
 

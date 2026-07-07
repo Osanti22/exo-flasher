@@ -47,15 +47,19 @@ you know can transfer data.
 
 ### 3. Flash it
 
-1. Save the firmware `.bin` we sent you somewhere you can find it.
+1. Save the firmware files we sent you somewhere you can find them.
 2. Go to **https://osanti22.github.io/exo-flasher/**
 3. Plug the exoskeleton unit into your computer/phone with the USB cable.
 4. Click **Connect** and, in the browser's port picker, choose the serial port for
    the board (often shown as *USB JTAG/serial debug unit* or a `USB Serial` /
    `ttyACM` / `COM` device). The page then shows the board's chip, MAC, and flash size.
-5. Pick the firmware `.bin` we sent you (drag it onto the page or browse for it).
-6. Click **Flash** and watch the progress bar. The ~9.6 MB image takes roughly a
-   minute. Do not unplug the board while it runs.
+5. Pick the mode:
+   - **Update (default)** keeps the unit's calibration and WiFi. Choose the **app**
+     file and the **OTA data** file we sent (and the **GUI** file if we included one).
+   - **Recovery (full)** rewrites everything and **erases calibration and WiFi**. Only
+     use it if we tell you to (a bricked or brand-new unit). It takes one merged `.bin`.
+6. Click **Flash** and watch the progress bar. Do not unplug the board while it runs.
+   It resets and shows the boot log on its own when done.
 
 ### 4. Confirm it worked
 
@@ -88,7 +92,19 @@ shows and report it.
 
 ## For maintainers
 
-### Making an image to send to a client
+### Two flashing modes
+
+The page has two modes. Send the client the files for the mode they need:
+
+- **Update** (default, keeps calibration + WiFi) writes only the changed partitions as
+  separate segments and never touches `nvs` at `0x9000`. Send the raw build files:
+  `exoskeleton_main_firmware.bin` (app, required), `ota_data_initial.bin` (required),
+  and `www.bin` (GUI, optional). Sending `ota_data` is not optional - without it, a unit
+  that last booted the other OTA slot ignores the freshly written app.
+- **Recovery** (full, erases calibration + WiFi) writes one merged image at `0x0`. Send
+  the merged `.bin` from `build-image.sh`. For bricked or fresh units only.
+
+### Making a Recovery image to send to a client
 
 Firmware is not hosted here. To turn an ESP-IDF build into one flashable file, use
 `build-image.sh`. It takes the **build directory** and a short **label** and merges

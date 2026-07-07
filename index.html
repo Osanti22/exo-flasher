@@ -53,25 +53,48 @@
 
       <!-- ============ 2. FIRMWARE + FLASH ============ -->
       <section class="card">
-        <h2><span class="num">2</span> Choose the firmware file and flash</h2>
+        <h2><span class="num">2</span> Choose firmware and flash</h2>
 
-        <label class="field-label">Firmware image (.bin)</label>
-        <div id="fileDrop" class="filedrop">
-          <input id="fileInput" type="file" accept=".bin" />
-          Drag the <code>.bin</code> we sent you here, or
-          <label for="fileInput">browse</label> for it on your computer.
-          <div id="fileMeta" class="file-meta" hidden></div>
+        <div class="segmented" role="tablist">
+          <button id="modeUpdate" class="active" type="button">Update (keeps calibration)</button>
+          <button id="modeRecovery" type="button">Recovery (full)</button>
         </div>
-        <p class="notes">
-          The file is read in your browser and flashed over USB. It is never uploaded
-          anywhere. Use the exact merged image we provided (bootloader through www).
-        </p>
+        <p class="notes" id="modeHint"></p>
 
-        <div class="callout">
-          <span class="ic">🛡️</span>
-          <span>Calibration is preserved. This does <strong>not</strong> erase the unit's
-          per-unit settings (encoder offsets, IMU cal) stored in flash.</span>
+        <!-- Update mode: app + ota_data (+ optional GUI), written as separate segments -->
+        <div id="updatePanel">
+          <div class="file-row">
+            <div class="fr-label">App firmware <span class="req">required</span>
+              <span class="fr-sub">exoskeleton_main_firmware.bin &rarr; 0x20000</span></div>
+            <label class="choose-btn">Choose<input id="appFile" type="file" accept=".bin" /></label>
+            <span class="file-name" id="appFileName">no file</span>
+          </div>
+          <div class="file-row">
+            <div class="fr-label">OTA data <span class="req">required</span>
+              <span class="fr-sub">ota_data_initial.bin &rarr; 0xf000</span></div>
+            <label class="choose-btn">Choose<input id="otadataFile" type="file" accept=".bin" /></label>
+            <span class="file-name" id="otadataFileName">no file</span>
+          </div>
+          <div class="file-row">
+            <div class="fr-label">GUI <span class="opt">optional</span>
+              <span class="fr-sub">www.bin &rarr; 0x830000</span></div>
+            <label class="choose-btn">Choose<input id="wwwFile" type="file" accept=".bin" /></label>
+            <span class="file-name" id="wwwFileName">no file</span>
+          </div>
         </div>
+
+        <!-- Recovery mode: one merged image written whole at 0x0 -->
+        <div id="recoveryPanel" hidden>
+          <label class="field-label">Merged firmware image (.bin)</label>
+          <div id="fileDrop" class="filedrop">
+            <input id="fileInput" type="file" accept=".bin" />
+            Drag the merged <code>.bin</code> here, or
+            <label for="fileInput">browse</label> for it on your computer.
+            <div id="fileMeta" class="file-meta" hidden></div>
+          </div>
+        </div>
+
+        <div id="modeCallout" class="callout"></div>
 
         <div class="row">
           <button id="flashBtn" class="primary" disabled>Flash</button>
