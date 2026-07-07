@@ -244,17 +244,12 @@ async function flash() {
 // Serial monitor (reads the board's boot log after flashing)
 // ---------------------------------------------------------------------------
 async function openMonitor() {
-  if (!esploader || monitoring) return;
+  if (!port || monitoring) return;
   showTab("logs");
-  setStatus("Resetting board", "busy");
-  try {
-    await esploader.after("hard_reset");     // run the freshly flashed app
-  } catch (e) {
-    logLine("Reset note: " + e.message, "dim");
-  }
-  try {
-    await transport.disconnect();            // release the port from esptool
-  } catch (e) { /* ignore */ }
+  setStatus("Opening monitor", "busy");
+
+  // Release esptool's hold on the port but keep the SerialPort object.
+  try { if (transport) await transport.disconnect(); } catch (e) { /* ignore */ }
   connected = false;
   esploader = null;
   transport = null;
@@ -276,17 +271,32 @@ async function openMonitor() {
   setStatus("Serial monitor", "ok");
   els.monitorBtn.hidden = true;
   logLine("--- serial monitor open (" + APP_BAUD + " baud) - watching for '" + IMU_OK + "' ---", "dim");
-  streamSerial();
+  streamSerial();                     // start reading before we reset, so we catch the boot log
+  await sleep(80);
+  logLine("Resetting into the app...", "dim");
+  els.logBadge.hidden = true;
+  try { await pulseReset(); } catch (e) { logLine("Reset note: " + (e.message || e), "dim"); }
 }
 
 async function streamSerial() {
   const decoder = new TextDecoder();
   let buffer = "";
-  while (port && port.readable && monitoring) {
-    appReader = port.readable.getReader();
+  let misses = 0;
+  while (monitoring) {
+    // On the native USB the port can briefly drop when the chip reboots; wait
+    // for it to come back instead of ending the monitor.
+    if (!port || !port.readable) {
+      if (++misses > 50) { logLine("Serial port lost. Reconnect to continue.", "warn"); break; }
+      await sleep(100);
+      continue;
+    }
+    misses = 0;
+    let reader;
     try {
+      reader = port.readable.getReader();
+      appReader = reader;
       while (true) {
-        const { value, done } = await appReader.read();
+        const { value, done } = await reader.read();
         if (done) break;
         if (!value) continue;
         buffer += decoder.decode(value, { stream: true });
@@ -297,9 +307,9 @@ async function streamSerial() {
         }
       }
     } catch (e) {
-      if (monitoring) logLine("Serial read stopped: " + e.message, "dim");
+      if (monitoring) await sleep(100);   // transient read error, retry the loop
     } finally {
-      try { appReader.releaseLock(); } catch (e) {}
+      try { reader && reader.releaseLock(); } catch (e) {}
     }
   }
 }
@@ -316,14 +326,16 @@ async function stopMonitor() {
 // Reset the board (reboot into the app)
 // ---------------------------------------------------------------------------
 
-// Pulse the reset line (RTS) on our raw serial port to reboot into the app -
-// the same "Hard resetting via RTS pin" esptool uses. Works on the native
-// USB-Serial-JTAG and on UART bridges. DTR stays low so the chip runs the app
-// (not download mode).
+// Reboot into the app by pulsing only the reset line (RTS) - the same
+// "Hard resetting via RTS pin" esptool uses. We must NOT touch DTR: on the
+// ESP32-S3 native USB-Serial-JTAG, DTR drives GPIO0, and sending DTR events
+// makes the chip fall into download mode ("waiting for download") instead of
+// running the app. RTS-only resets straight into the app on both native USB
+// and UART bridges.
 async function pulseReset() {
-  await port.setSignals({ dataTerminalReady: false, requestToSend: true });  // hold in reset
-  await sleep(120);
-  await port.setSignals({ dataTerminalReady: false, requestToSend: false }); // release -> boots app
+  await port.setSignals({ requestToSend: true });   // EN low - hold in reset
+  await sleep(100);
+  await port.setSignals({ requestToSend: false });  // EN high - release, boots the app
 }
 
 async function resetBoard() {
