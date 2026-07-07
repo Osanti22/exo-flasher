@@ -15,8 +15,10 @@ over [WebSerial](https://developer.mozilla.org/en-US/docs/Web/API/Web_Serial_API
 page - they are sent to the client directly, and the client picks the file from their
 own PC to flash it. This keeps the images off the public site.
 
-The page also shows a live progress bar, a Logs and console tab (including the board's
-boot log after flashing), and the connected device's info (chip, MAC, flash size).
+The page also shows a live progress bar, the connected device's info (chip, MAC, flash
+size), and a Logs and console panel with its own serial monitor. The monitor opens a
+port of its own, separate from the flashing port, so you can flash on one port and
+watch a board's logs on another (or on the same board after flashing).
 
 ---
 
@@ -57,8 +59,9 @@ you know can transfer data.
 
 ### 4. Confirm it worked
 
-When flashing finishes, click **Open serial monitor** (or the **Logs and console**
-tab). The board reboots into the new firmware and prints its boot banner.
+When flashing finishes, in the **Logs and console** panel click **Open** and pick the
+board's serial port, then click **Reset board** (in the Connect card) or **Reset** in
+the Logs panel. The board reboots into the new firmware and prints its boot banner.
 
 Look for the **IMU boot line**. It will be one of these two, depending on the
 hardware revision the board auto-detects:

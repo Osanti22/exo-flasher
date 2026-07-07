@@ -4,7 +4,13 @@
 // the USB cable; nothing is uploaded to a server. No firmware is hosted here: the
 // user picks a merged .bin from their own PC (we send them the image directly).
 //
-// esptool-js is vendored (see vendor/esptool-js/) so there is no runtime CDN
+// Two independent serial ports:
+//   - the FLASH port (esptool-js): Connect / Flash / Reset board.
+//   - the LOG port: the Logs & console panel opens its own port and streams until
+//     Close. It is separate from the flash port, so you can flash on one port and
+//     watch logs on another (or a second connection to the same board).
+//
+// esptool-js is vendored (see vendor/esptool-js/), so there is no runtime CDN
 // dependency and the version is pinned.
 
 import { ESPLoader, Transport } from "./vendor/esptool-js/bundle.js";
@@ -18,7 +24,6 @@ const EXPECTED_CHIP = "ESP32-S3";
 // USB speed regardless - so 115200 is just as fast and avoids a "port lost" on the
 // baud change. Only raise this if a build ever ships on a real UART bridge.
 const FLASH_BAUD = 115200;
-const APP_BAUD = 115200;     // serial monitor speed for reading the boot log
 const FLASH_OFFSET = 0;      // merged image is written whole at 0 (bootloader..www)
 
 // The "IMU LH up" lines the firmware prints on a good boot. Success is one of these.
@@ -29,14 +34,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
-let port = null;          // the SerialPort chosen in the browser picker
-let transport = null;     // esptool-js Transport wrapping the port
+// Flash port
+let port = null;          // the SerialPort chosen for flashing
+let transport = null;     // esptool-js Transport wrapping the flash port
 let esploader = null;     // esptool-js loader (held open while connected)
 let connected = false;    // true once we are synced with the bootloader
 let flashing = false;
-let monitoring = false;   // true while the serial monitor is reading the app
-let appReader = null;     // reader used by the serial monitor
 let localFile = null;     // the .bin chosen from disk
+
+// Log port (independent serial monitor)
+let logPort = null;
+let logReader = null;
+let logOpen = false;
 
 // ---------------------------------------------------------------------------
 // DOM helpers
@@ -48,10 +57,9 @@ const els = {};
   "connectBtn", "disconnectBtn", "resetBtn",
   "deviceInfo", "diChip", "diRev", "diMac", "diFlash", "diFeatures",
   "fileInput", "fileDrop", "fileMeta",
-  "flashBtn", "monitorBtn",
+  "flashBtn",
   "progressWrap", "progressBar", "progressPhase", "progressPct",
-  "tabGuide", "tabLogs", "panelGuide", "panelLogs",
-  "console", "clearLogBtn", "copyLogBtn", "logBadge",
+  "logOpenBtn", "logResetBtn", "logBaud", "clearLogBtn", "copyLogBtn", "console",
 ].forEach((id) => (els[id] = $(id)));
 
 function setStatus(text, kind) {
@@ -67,19 +75,25 @@ function logLine(text, kind) {
   span.textContent = text.endsWith("\n") ? text : text + "\n";
   con.appendChild(span);
   if (atBottom) con.scrollTop = con.scrollHeight;
-  // highlight the success line so testers spot it
-  if (text.includes(IMU_OK)) {
-    span.classList.add("ok");
-    els.logBadge.hidden = false;
-  }
+  if (text.includes(IMU_OK)) span.classList.add("ok");   // highlight the success line
 }
 
-// esptool-js terminal: routes the loader's own output into the Logs console.
+// esptool-js terminal: routes the loader's own output into the console.
 const terminal = {
   clean() { /* keep history; do not wipe the console */ },
   writeLine(data) { logLine(data, "dim"); },
   write(data) { logLine(data, "dim"); },
 };
+
+// Pulse only the reset line (RTS) to reboot a board into the app - the same
+// "Hard resetting via RTS pin" esptool uses. We must NOT touch DTR: on the
+// ESP32-S3 native USB-Serial-JTAG, DTR drives GPIO0, and sending DTR events makes
+// the chip fall into download mode ("waiting for download") instead of running.
+async function pulseResetPort(p) {
+  await p.setSignals({ requestToSend: true });   // EN low - hold in reset
+  await sleep(100);
+  await p.setSignals({ requestToSend: false });  // EN high - release, boots the app
+}
 
 // ---------------------------------------------------------------------------
 // Firmware file (picked from the user's PC)
@@ -100,11 +114,10 @@ function updateFlashEnabled() {
 }
 
 // ---------------------------------------------------------------------------
-// Connect / device info
+// Connect the flash port / device info
 // ---------------------------------------------------------------------------
 async function connect() {
   if (flashing) return;
-  await stopMonitor();                  // in case a monitor was running
   if (connected) await hardCleanup();   // "Reconnect": drop the old port first
   try {
     port = await navigator.serial.requestPort();
@@ -112,12 +125,11 @@ async function connect() {
     logLine("No port selected.", "warn");
     return;
   }
-  // Auto-reset into the bootloader, no button press. esptool-js picks the reset
-  // for us: a native USB-Serial-JTAG board (PID 0x1001) gets the USB-JTAG reset,
+
+  // Auto-reset into the bootloader, no button press. esptool-js picks the reset by
+  // USB PID: a native USB-Serial-JTAG board (PID 0x1001) gets the USB-JTAG reset,
   // anything else gets the classic DTR/RTS auto-reset - same as esptool.py's
-  // default-reset. We then try a small ladder so custom boards work too:
-  //   - native USB (0x1001): default (USB-JTAG) -> no_reset (if user held BOOT)
-  //   - bridge / custom PID:  default (classic) -> usb_reset (native, odd PID) -> no_reset
+  // default-reset. We try a small ladder so custom boards work too.
   const info = (port.getInfo && port.getInfo()) || {};
   const isNativeUsbJtag = info.usbProductId === 0x1001;
   logLine(
@@ -162,7 +174,7 @@ async function connect() {
     updateFlashEnabled();
   } else {
     logLine("Connect failed: " + (lastErr && (lastErr.message || lastErr)), "err");
-    logLine("Auto-reset did not work. If this is a custom board with no auto-reset circuit, hold BOOT while clicking Connect (release after the port picker). Also close any other program using the port (idf.py monitor, Arduino IDE, PuTTY) and use a data USB cable.", "warn");
+    logLine("Auto-reset did not work. If this is a custom board with no auto-reset circuit, hold BOOT while clicking Connect (release after the port picker). Also close any other program using the port and use a data USB cable.", "warn");
     setStatus("Connect failed", "err");
     await hardCleanup();
   }
@@ -187,6 +199,21 @@ async function readDeviceInfo(chipDesc) {
   }
 }
 
+// Reset the flash-connected board into the app, then end the flash session.
+async function resetBoard() {
+  if (flashing || !port) return;
+  logLine("Resetting board (RTS pulse)...", "dim");
+  try {
+    await pulseResetPort(port);
+  } catch (e) {
+    logLine("Reset failed: " + (e.message || e), "err");
+    return;
+  }
+  logLine("Board reset - it should be running the app now. Open the Logs monitor to watch it.", "ok");
+  await hardCleanup();
+  setStatus("Reset", "");
+}
+
 // ---------------------------------------------------------------------------
 // Flash
 // ---------------------------------------------------------------------------
@@ -201,7 +228,6 @@ async function flash() {
   if (!connected || flashing || !localFile) return;
   flashing = true;
   els.flashBtn.disabled = true;
-  els.monitorBtn.hidden = true;
   els.progressWrap.hidden = false;
   setStatus("Flashing", "busy");
   setProgress(0, "Reading firmware");
@@ -227,9 +253,8 @@ async function flash() {
 
     setProgress(1, "Done");
     setStatus("Flashed OK", "ok");
-    logLine("Flash complete. Open the serial monitor to see the boot log.", "ok");
+    logLine("Flash complete. Click Reset board to run it, or open the Logs monitor to watch the boot log.", "ok");
     els.flashBtn.textContent = "Flash again";
-    els.monitorBtn.hidden = false;
   } catch (e) {
     logLine("Flash failed: " + (e.message || e), "err");
     setStatus("Flash failed", "err");
@@ -241,60 +266,62 @@ async function flash() {
 }
 
 // ---------------------------------------------------------------------------
-// Serial monitor (reads the board's boot log after flashing)
+// Logs & console - independent serial monitor
 // ---------------------------------------------------------------------------
-async function openMonitor() {
-  if (!port || monitoring) return;
-  showTab("logs");
-  setStatus("Opening monitor", "busy");
-
-  // Release esptool's hold on the port but keep the SerialPort object.
-  try { if (transport) await transport.disconnect(); } catch (e) { /* ignore */ }
-  connected = false;
-  esploader = null;
-  transport = null;
-  els.connectBtn.textContent = "Connect";
-  els.flashBtn.textContent = "Flash";
-  els.deviceInfo.hidden = true;
-  els.disconnectBtn.hidden = false;   // let the user stop the monitor
-  els.resetBtn.hidden = false;        // reset stays available while watching
-  updateFlashEnabled();
-
+async function openLogs() {
+  if (logOpen) return;
   try {
-    await port.open({ baudRate: APP_BAUD });
+    logPort = await navigator.serial.requestPort();
   } catch (e) {
-    logLine("Could not open serial monitor: " + e.message, "err");
-    setStatus("Monitor failed", "err");
+    logLine("No log port selected.", "warn");
     return;
   }
-  monitoring = true;
-  setStatus("Serial monitor", "ok");
-  els.monitorBtn.hidden = true;
-  logLine("--- serial monitor open (" + APP_BAUD + " baud) - watching for '" + IMU_OK + "' ---", "dim");
-  streamSerial();                     // start reading before we reset, so we catch the boot log
-  await sleep(80);
-  logLine("Resetting into the app...", "dim");
-  els.logBadge.hidden = true;
-  try { await pulseReset(); } catch (e) { logLine("Reset note: " + (e.message || e), "dim"); }
+  const baud = parseInt(els.logBaud.value, 10) || 115200;
+  try {
+    await logPort.open({ baudRate: baud });
+  } catch (e) {
+    logLine("Could not open the log port: " + (e.message || e) +
+      " - if this is the flashing port, click Disconnect first.", "err");
+    logPort = null;
+    return;
+  }
+  logOpen = true;
+  els.logOpenBtn.textContent = "Close";
+  els.logResetBtn.hidden = false;
+  els.logBaud.disabled = true;
+  logLine(`--- log monitor open (${baud} baud) - watching for '${IMU_OK}' ---`, "dim");
+  streamLogs();
 }
 
-async function streamSerial() {
+async function closeLogs() {
+  logOpen = false;
+  els.logOpenBtn.textContent = "Open";
+  els.logResetBtn.hidden = true;
+  els.logBaud.disabled = false;
+  try { if (logReader) await logReader.cancel(); } catch (e) {}
+  try { if (logPort) await logPort.close(); } catch (e) {}
+  logReader = null;
+  logPort = null;
+  logLine("--- log monitor closed ---", "dim");
+}
+
+async function streamLogs() {
   const decoder = new TextDecoder();
   let buffer = "";
   let misses = 0;
-  while (monitoring) {
-    // On the native USB the port can briefly drop when the chip reboots; wait
-    // for it to come back instead of ending the monitor.
-    if (!port || !port.readable) {
-      if (++misses > 50) { logLine("Serial port lost. Reconnect to continue.", "warn"); break; }
+  while (logOpen) {
+    // The native USB can briefly drop when the chip reboots; wait for it instead
+    // of ending the monitor.
+    if (!logPort || !logPort.readable) {
+      if (++misses > 50) { logLine("Log port lost. Click Close, then Open again.", "warn"); break; }
       await sleep(100);
       continue;
     }
     misses = 0;
     let reader;
     try {
-      reader = port.readable.getReader();
-      appReader = reader;
+      reader = logPort.readable.getReader();
+      logReader = reader;
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -307,60 +334,24 @@ async function streamSerial() {
         }
       }
     } catch (e) {
-      if (monitoring) await sleep(100);   // transient read error, retry the loop
+      if (logOpen) await sleep(100);   // transient read error, retry the loop
     } finally {
       try { reader && reader.releaseLock(); } catch (e) {}
     }
   }
 }
 
-async function stopMonitor() {
-  if (!monitoring) return;
-  monitoring = false;
-  try { if (appReader) await appReader.cancel(); } catch (e) {}
-  try { if (port) await port.close(); } catch (e) {}
-  appReader = null;
+// Reboot the board we are monitoring (RTS pulse on the log port), keep streaming.
+async function resetLogs() {
+  if (!logOpen || !logPort) return;
+  logLine("Resetting monitored board (RTS pulse)...", "dim");
+  try { await pulseResetPort(logPort); } catch (e) { logLine("Reset failed: " + (e.message || e), "err"); }
 }
 
 // ---------------------------------------------------------------------------
-// Reset the board (reboot into the app)
-// ---------------------------------------------------------------------------
-
-// Reboot into the app by pulsing only the reset line (RTS) - the same
-// "Hard resetting via RTS pin" esptool uses. We must NOT touch DTR: on the
-// ESP32-S3 native USB-Serial-JTAG, DTR drives GPIO0, and sending DTR events
-// makes the chip fall into download mode ("waiting for download") instead of
-// running the app. RTS-only resets straight into the app on both native USB
-// and UART bridges.
-async function pulseReset() {
-  await port.setSignals({ requestToSend: true });   // EN low - hold in reset
-  await sleep(100);
-  await port.setSignals({ requestToSend: false });  // EN high - release, boots the app
-}
-
-async function resetBoard() {
-  if (flashing) return;
-  if (monitoring) {
-    // The serial monitor owns the port: pulse reset and keep streaming the boot log.
-    logLine("Resetting board (RTS pulse)...", "dim");
-    els.logBadge.hidden = true;
-    try { await pulseReset(); } catch (e) { logLine("Reset failed: " + (e.message || e), "err"); }
-    return;
-  }
-  if (esploader) {
-    // Still connected to the bootloader: hard reset into the app and open the
-    // serial monitor so the boot log is visible.
-    await openMonitor();
-    return;
-  }
-  logLine("Connect to a board first, then Reset.", "warn");
-}
-
-// ---------------------------------------------------------------------------
-// Disconnect / cleanup
+// Disconnect / cleanup (flash port only; the log monitor is independent)
 // ---------------------------------------------------------------------------
 async function disconnect() {
-  await stopMonitor();
   await hardCleanup();
   setStatus("Disconnected", "");
   logLine("Disconnected.", "dim");
@@ -368,7 +359,7 @@ async function disconnect() {
 
 async function hardCleanup() {
   try { if (transport) await transport.disconnect(); } catch (e) {}
-  try { if (port && !monitoring) await port.close(); } catch (e) {}
+  try { if (port) await port.close(); } catch (e) {}
   connected = false;
   esploader = null;
   transport = null;
@@ -378,20 +369,7 @@ async function hardCleanup() {
   els.resetBtn.hidden = true;
   els.connectBtn.textContent = "Connect";
   els.flashBtn.textContent = "Flash";
-  els.monitorBtn.hidden = true;
   updateFlashEnabled();
-}
-
-// ---------------------------------------------------------------------------
-// Tabs
-// ---------------------------------------------------------------------------
-function showTab(which) {
-  const logs = which === "logs";
-  els.tabGuide.classList.toggle("active", !logs);
-  els.tabLogs.classList.toggle("active", logs);
-  els.panelGuide.hidden = logs;
-  els.panelLogs.hidden = !logs;
-  if (logs) els.logBadge.hidden = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -408,7 +386,6 @@ function init() {
   els.disconnectBtn.addEventListener("click", disconnect);
   els.resetBtn.addEventListener("click", resetBoard);
   els.flashBtn.addEventListener("click", flash);
-  els.monitorBtn.addEventListener("click", openMonitor);
 
   els.fileInput.addEventListener("change", (e) => pickFile(e.target.files[0]));
   ["dragover", "dragenter"].forEach((ev) =>
@@ -421,12 +398,15 @@ function init() {
     if (e.dataTransfer.files && e.dataTransfer.files[0]) pickFile(e.dataTransfer.files[0]);
   });
 
-  els.tabGuide.addEventListener("click", () => showTab("guide"));
-  els.tabLogs.addEventListener("click", () => showTab("logs"));
-  els.clearLogBtn.addEventListener("click", () => { els.console.textContent = ""; els.logBadge.hidden = true; });
+  els.logOpenBtn.addEventListener("click", () => (logOpen ? closeLogs() : openLogs()));
+  els.logResetBtn.addEventListener("click", resetLogs);
+  els.clearLogBtn.addEventListener("click", () => { els.console.textContent = ""; });
   els.copyLogBtn.addEventListener("click", () => navigator.clipboard.writeText(els.console.textContent));
 
-  window.addEventListener("beforeunload", () => { try { hardCleanup(); } catch (e) {} });
+  window.addEventListener("beforeunload", () => {
+    try { hardCleanup(); } catch (e) {}
+    try { closeLogs(); } catch (e) {}
+  });
 
   setStatus("Disconnected", "");
 }

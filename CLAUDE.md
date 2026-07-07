@@ -14,7 +14,7 @@ The flasher drives `esptool-js` directly (vendored, pinned) so the page owns the
 
 - `index.html` - page shell only (markup + element ids).
 - `styles.css` - all styling (dark, card-based).
-- `app.js` - ES module, the whole app: connect, flash a user-picked `.bin`, serial monitor, device info.
+- `app.js` - ES module, the whole app: connect + flash a user-picked `.bin`, device info, and an independent Logs monitor. Two separate serial ports: the flash port (esptool) and the Logs port (its own `requestPort`), so flashing and log-watching don't share a connection.
 - `vendor/esptool-js/bundle.js` - vendored self-contained ESM build of esptool-js (no runtime CDN). `VERSION.txt` says which version and how to bump it.
 - `build-image.sh` - merges an ESP-IDF build into one `.bin` to hand to a client. Does not host or commit anything.
 - `.gitignore` - blocks `*.bin` so a firmware image can never be committed.
@@ -35,7 +35,7 @@ There are no tests, no lint, no CI. Verify the page by serving locally (`python3
 - **The flash write must stay this exact shape: merged image at offset 0, no full erase.** `app.js` writes with `flashMode/flashFreq/flashSize: "keep"` and `eraseAll: false`. `"keep"` makes esptool-js write the bin byte-for-byte (it skips patching the header). A full erase would wipe NVS/calibration; the merged image spans `0x0`-`0x930000` and everything above it (per-unit calibration) is never touched. Do not "improve" this into a per-segment or erase-all write without the real partition table - you can wipe calibration.
 - **The image the user picks must be a merged image** (bootloader through www at their real offsets), which is exactly what `build-image.sh` produces. `app.js` warns if the file does not start with `0xE9` (ESP image magic) but still lets it through.
 - **Flash params are fixed for these boards** and hardcoded in `build-image.sh`: `--chip esp32s3 --flash-mode dio --flash-freq 80m --flash-size 16MB`. The build dir must contain `bootloader/bootloader.bin`, `partition_table/partition-table.bin`, `ota_data_initial.bin`, `exoskeleton_main_firmware.bin`, `www.bin`.
-- **One image, two board revisions.** The firmware auto-detects V3.1 vs Version #1 at boot and picks the IMU driver. The tester "success" signal is one of the two `IMU LH up (...)` lines in the serial log; `app.js` highlights that line (the `IMU_OK` constant) and the Guide tab in `index.html` mirrors the exact lines. Keep them in sync if the firmware boot banner changes.
+- **One image, two board revisions.** The firmware auto-detects V3.1 vs Version #1 at boot and picks the IMU driver. The tester "success" signal is one of the two `IMU LH up (...)` lines in the serial log; `app.js` highlights any line containing the `IMU_OK` substring in the Logs console. Update `IMU_OK` if the firmware boot banner changes.
 - **Serial baud.** `app.js` flashes at `FLASH_BAUD` (921600) and opens the post-flash monitor at `APP_BAUD` (115200). The exo boards use the ESP32-S3 native USB, which ignores the baud number; the values matter only if a build ever uses a real UART bridge.
 - **To update esptool-js:** `npm pack esptool-js@<ver>`, copy `package/bundle.js` to `vendor/esptool-js/bundle.js`, bump `VERSION.txt`. The bundle must stay a self-contained ESM (no bare imports) so it works with no build step.
 

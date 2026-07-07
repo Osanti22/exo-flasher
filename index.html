@@ -75,7 +75,6 @@
 
         <div class="row">
           <button id="flashBtn" class="primary" disabled>Flash</button>
-          <button id="monitorBtn" hidden>Open serial monitor</button>
         </div>
 
         <div id="progressWrap" class="progress" hidden>
@@ -87,60 +86,50 @@
         </div>
       </section>
 
-      <!-- ============ 3. GUIDE / LOGS ============ -->
+      <!-- ============ 3. GUIDE ============ -->
+      <section class="card guide">
+        <h2>Before you start</h2>
+        <ul>
+          <li>
+            <strong>Use the right browser.</strong>
+            <span class="badge-yes">Chrome</span> <span class="badge-yes">Edge</span>
+            on desktop, or Chrome 148+ on Android with a USB-C OTG cable.
+            <span class="badge-no">Safari</span> <span class="badge-no">iPhone/iPad</span>
+            <span class="badge-no">Firefox</span> will not work.
+          </li>
+          <li><strong>Use a DATA USB cable</strong>, not a charge-only one. If the unit
+            never appears in the port picker, the cable is the usual cause.</li>
+          <li><strong>Click Connect</strong>, pick the serial port in the pop-up, then
+            flash. The image is about 9.6 MB and takes roughly a minute.</li>
+        </ul>
+      </section>
+
+      <!-- ============ 4. LOGS & CONSOLE (independent serial monitor) ============ -->
       <section class="card">
-        <div class="tabs">
-          <button id="tabGuide" class="tab active">Guide</button>
-          <button id="tabLogs" class="tab">Logs &amp; console<span id="logBadge" class="badge" hidden>IMU OK</span></button>
+        <h2>Logs &amp; console</h2>
+        <div class="console-tools">
+          <button id="logOpenBtn" class="primary small">Open</button>
+          <label class="baud-label">baud
+            <select id="logBaud">
+              <option>9600</option>
+              <option>74880</option>
+              <option selected>115200</option>
+              <option>230400</option>
+              <option>460800</option>
+              <option>921600</option>
+            </select>
+          </label>
+          <button id="logResetBtn" class="small" hidden>Reset</button>
+          <span class="spacer"></span>
+          <button id="clearLogBtn" class="small">Clear</button>
+          <button id="copyLogBtn" class="small">Copy</button>
         </div>
-
-        <!-- Guide tab -->
-        <div id="panelGuide" class="guide">
-          <h3>Before you start</h3>
-          <ul>
-            <li>
-              <strong>Use the right browser.</strong>
-              <span class="badge-yes">Chrome</span> <span class="badge-yes">Edge</span>
-              on desktop, or Chrome 148+ on Android with a USB-C OTG cable.
-              <span class="badge-no">Safari</span> <span class="badge-no">iPhone/iPad</span>
-              <span class="badge-no">Firefox</span> will not work.
-            </li>
-            <li><strong>Use a DATA USB cable</strong>, not a charge-only one. If the unit
-              never appears in the port picker, the cable is the usual cause.</li>
-            <li><strong>Click Connect</strong>, pick the serial port in the pop-up, then
-              flash. The image is about 9.6 MB and takes roughly a minute.</li>
-          </ul>
-
-          <h3>How to confirm it worked</h3>
-          <p style="color: var(--ink-dim);">
-            After flashing, click <strong>Open serial monitor</strong> and watch the boot log
-            (or the Logs tab). You succeeded if you see either of these lines:
-          </p>
-          <pre class="boot">IMU LH up (V3.1 single: cs=17, rst/wake0 via PCA9534@0x20, no-INT, accel+gyro+rotvec)
-IMU LH up (Version#1 single: cs=17, rst=8 wake=18 direct-GPIO, no-INT, accel+gyro+rotvec)</pre>
-          <p style="color: var(--ink-dim);">
-            You only ever see one. The same image works on both board revisions - the
-            firmware auto-detects V3.1 or Version #1 and picks the right IMU driver.
-          </p>
-
-          <h3>Troubleshooting</h3>
-          <ul>
-            <li><strong>Port doesn't appear?</strong> Try a different data cable and USB port.</li>
-            <li><strong>Unit disconnects and reconnects on its own?</strong> A blank board can
-              briefly drop off the USB bus. Just click Connect again.</li>
-            <li><strong>A badly-flashed unit won't connect?</strong> Hold <kbd>BOOT</kbd> while
-              plugging in (keep it held until the port appears), then release and Connect.</li>
-          </ul>
-        </div>
-
-        <!-- Logs tab -->
-        <div id="panelLogs" hidden>
-          <div class="console-tools">
-            <button id="clearLogBtn" class="small">Clear</button>
-            <button id="copyLogBtn" class="small">Copy</button>
-          </div>
-          <div id="console" class="console" aria-live="polite"></div>
-        </div>
+        <p class="notes" id="logHint">
+          Open a serial port to watch a board's output. This is separate from the flashing
+          port, so you can flash on one port and watch logs on another. It streams until you
+          click Close. Flashing output also shows here.
+        </p>
+        <div id="console" class="console" aria-live="polite"></div>
       </section>
     </div>
 
