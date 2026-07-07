@@ -46,6 +46,7 @@ let localFile = null;     // the .bin chosen from disk
 let logPort = null;
 let logReader = null;
 let logOpen = false;
+let logBaudRate = 115200;
 
 // ---------------------------------------------------------------------------
 // DOM helpers
@@ -316,9 +317,9 @@ async function beginLog(p, reset) {
     await hardCleanup();   // closes the port; p stays a valid SerialPort to reopen
   }
   logPort = p;
-  const baud = parseInt(els.logBaud.value, 10) || 115200;
+  logBaudRate = parseInt(els.logBaud.value, 10) || 115200;
   try {
-    await logPort.open({ baudRate: baud });
+    await logPort.open({ baudRate: logBaudRate });
   } catch (e) {
     logLine("Could not open the log port: " + (e.message || e) +
       " - another program may be using it (idf.py monitor, Arduino IDE, PuTTY).", "err");
@@ -329,8 +330,8 @@ async function beginLog(p, reset) {
   els.logOpenBtn.textContent = "Close";
   els.logResetBtn.hidden = false;
   els.logBaud.disabled = true;
-  logLine(`--- log monitor open (${baud} baud) - watching for '${IMU_OK}' ---`, "dim");
-  streamLogs();                      // start reading before any reset
+  logLine(`--- log monitor open (${logBaudRate} baud) - watching for '${IMU_OK}' ---`, "dim");
+  monitorLoop();                     // reads and reopens across a reboot re-enumeration
   if (reset) {
     await sleep(80);
     logLine("Resetting into the app...", "dim");
@@ -351,19 +352,27 @@ async function closeLogs() {
   logLine("--- log monitor closed ---", "dim");
 }
 
-async function streamLogs() {
+// Read the log port and keep it alive across a reboot. When the board resets, the
+// ESP32-S3 native USB drops off the bus and re-enumerates, which closes the port;
+// we reopen the same SerialPort when it comes back (like idf.py monitor does).
+async function monitorLoop() {
   const decoder = new TextDecoder();
   let buffer = "";
-  let misses = 0;
-  while (logOpen) {
-    // The native USB can briefly drop when the chip reboots; wait for it instead
-    // of ending the monitor.
-    if (!logPort || !logPort.readable) {
-      if (++misses > 50) { logLine("Log port lost. Click Close, then Open again.", "warn"); break; }
-      await sleep(100);
-      continue;
+  while (logOpen && logPort) {
+    // (Re)open the port if it is closed - e.g. right after a reboot.
+    if (!logPort.readable) {
+      let reopened = false;
+      for (let i = 0; i < 150 && logOpen; i++) {   // wait up to ~15s for it to return
+        if (logPort.readable) { reopened = true; break; }   // already open
+        try { await logPort.open({ baudRate: logBaudRate }); reopened = true; break; }
+        catch (e) { await sleep(100); }                     // not back yet, retry
+      }
+      if (!reopened) {
+        if (logOpen) logLine("Board did not come back on this port. Click Close, then Open again.", "warn");
+        break;
+      }
+      logLine("(reconnected)", "dim");
     }
-    misses = 0;
     let reader;
     try {
       reader = logPort.readable.getReader();
@@ -380,10 +389,22 @@ async function streamLogs() {
         }
       }
     } catch (e) {
-      if (logOpen) await sleep(100);   // transient read error, retry the loop
+      await sleep(50);   // read failed (usually the reboot drop) - the loop reopens
     } finally {
       try { reader && reader.releaseLock(); } catch (e) {}
+      logReader = null;
     }
+    await sleep(20);
+  }
+}
+
+// When the board drops off USB on reset, cancel the current read so the monitor
+// loop unblocks and moves to reopening the port.
+function onSerialDisconnect(e) {
+  const p = e.target || e.port;
+  if (logOpen && logPort && p === logPort) {
+    logLine("Board dropped off USB (reboot) - waiting for it to come back...", "dim");
+    try { if (logReader) logReader.cancel(); } catch (err) {}
   }
 }
 
@@ -446,6 +467,7 @@ function init() {
 
   els.logOpenBtn.addEventListener("click", () => (logOpen ? closeLogs() : openLogs()));
   els.logResetBtn.addEventListener("click", resetLogs);
+  navigator.serial.addEventListener("disconnect", onSerialDisconnect);
   els.clearLogBtn.addEventListener("click", () => { els.console.textContent = ""; });
   els.copyLogBtn.addEventListener("click", () => navigator.clipboard.writeText(els.console.textContent));
 
