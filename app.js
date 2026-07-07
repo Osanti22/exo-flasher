@@ -36,6 +36,11 @@ const OTADATA_SIZE = 0x2000;  // ota_data partition is 2 sectors (8 KB); we writ
 // The "IMU LH up" lines the firmware prints on a good boot. Success is one of these.
 const IMU_OK = "IMU LH up";
 
+// ESP32-S3 native USB-Serial-JTAG identity - used to find the board when it
+// re-enumerates after a reset.
+const BOARD_VID = 0x303a;
+const BOARD_JTAG_PID = 0x1001;
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------------------------------------------------------------------------
@@ -56,7 +61,8 @@ let wwwImg = null;        // Update: GUI image -> 0x830000 (optional)
 // Log port (independent serial monitor)
 let logPort = null;
 let logReader = null;
-let logOpen = false;
+let logOpen = false;         // user wants the monitor open (stays true across a reboot drop)
+let logReconnecting = false; // waiting for the board to re-enumerate after a reset
 let logBaudRate = 115200;
 
 // ---------------------------------------------------------------------------
@@ -73,7 +79,7 @@ const els = {};
   "fileInput", "fileDrop", "fileMeta",
   "flashBtn",
   "progressWrap", "progressBar", "progressPhase", "progressPct",
-  "logOpenBtn", "logResetBtn", "logBaud", "clearLogBtn", "copyLogBtn", "saveLogBtn", "console",
+  "logOpenBtn", "logResetBtn", "logReconnectBtn", "logBaud", "clearLogBtn", "copyLogBtn", "saveLogBtn", "console",
 ].forEach((id) => (els[id] = $(id)));
 
 function setStatus(text, kind) {
@@ -414,16 +420,34 @@ async function openLogs() {
   await beginLog(chosen, false);   // manual open: just watch, do not reset
 }
 
-// Open a serial port as the log monitor and stream it until Close. If the flash
-// connection holds this same device, release it first. With reset=true, pulse the
-// board into the app after the reader is up, so the boot log is caught.
+// Open a serial port as the log monitor. If the flash connection holds this same
+// device, release it first. With reset=true, pulse the board into the app after the
+// reader is up. The console shares the flashing USB and re-enumerates on reset, so the
+// read loop tolerates the drop and the port is reopened automatically.
 async function beginLog(p, reset) {
   if (port && p === port) {
     logLine("Using the flashing port for logs - closing the flash connection first.", "dim");
     await hardCleanup();   // closes the port; p stays a valid SerialPort to reopen
   }
-  logPort = p;
   logBaudRate = parseInt(els.logBaud.value, 10) || 115200;
+  logOpen = true;
+  els.logOpenBtn.textContent = "Close";
+  els.logResetBtn.hidden = false;
+  els.logBaud.disabled = true;
+  if (!(await attachLogPort(p))) { await closeLogs(); return false; }
+  logLine(`--- log monitor open (${logBaudRate} baud) - watching for '${IMU_OK}' ---`, "dim");
+  if (reset) {
+    await sleep(80);
+    logLine("Resetting into the app...", "dim");
+    // pulse resets the chip; the USB re-enumerates and the monitor reopens itself
+    try { await pulseResetPort(logPort); } catch (e) { logLine("Reset note: " + (e.message || e), "dim"); }
+  }
+  return true;
+}
+
+// Open a specific SerialPort at the monitor baud and read it in the background.
+async function attachLogPort(p) {
+  logPort = p;
   try {
     await logPort.open({ baudRate: logBaudRate });
   } catch (e) {
@@ -432,24 +456,18 @@ async function beginLog(p, reset) {
     logPort = null;
     return false;
   }
-  logOpen = true;
-  els.logOpenBtn.textContent = "Close";
-  els.logResetBtn.hidden = false;
-  els.logBaud.disabled = true;
-  logLine(`--- log monitor open (${logBaudRate} baud) - watching for '${IMU_OK}' ---`, "dim");
-  monitorLoop();                     // reads and reopens across a reboot re-enumeration
-  if (reset) {
-    await sleep(80);
-    logLine("Resetting into the app...", "dim");
-    try { await pulseResetPort(logPort); } catch (e) { logLine("Reset note: " + (e.message || e), "dim"); }
-  }
+  logReconnecting = false;
+  els.logReconnectBtn.hidden = true;
+  readLogLoop();   // background; returns when the port drops or the monitor closes
   return true;
 }
 
 async function closeLogs() {
   logOpen = false;
+  logReconnecting = false;
   els.logOpenBtn.textContent = "Open";
   els.logResetBtn.hidden = true;
+  els.logReconnectBtn.hidden = true;
   els.logBaud.disabled = false;
   try { if (logReader) await logReader.cancel(); } catch (e) {}
   try { if (logPort) await logPort.close(); } catch (e) {}
@@ -458,27 +476,13 @@ async function closeLogs() {
   logLine("--- log monitor closed ---", "dim");
 }
 
-// Read the log port and keep it alive across a reboot. When the board resets, the
-// ESP32-S3 native USB drops off the bus and re-enumerates, which closes the port;
-// we reopen the same SerialPort when it comes back (like idf.py monitor does).
-async function monitorLoop() {
+// Read logPort until it drops (a reboot re-enumeration) or the monitor is closed.
+// On a drop, hand off to enterReconnectWait so the port is reopened when the board
+// comes back.
+async function readLogLoop() {
   const decoder = new TextDecoder();
   let buffer = "";
-  while (logOpen && logPort) {
-    // (Re)open the port if it is closed - e.g. right after a reboot.
-    if (!logPort.readable) {
-      let reopened = false;
-      for (let i = 0; i < 150 && logOpen; i++) {   // wait up to ~15s for it to return
-        if (logPort.readable) { reopened = true; break; }   // already open
-        try { await logPort.open({ baudRate: logBaudRate }); reopened = true; break; }
-        catch (e) { await sleep(100); }                     // not back yet, retry
-      }
-      if (!reopened) {
-        if (logOpen) logLine("Board did not come back on this port. Click Close, then Open again.", "warn");
-        break;
-      }
-      logLine("(reconnected)", "dim");
-    }
+  while (logOpen && logPort && logPort.readable) {
     let reader;
     try {
       reader = logPort.readable.getReader();
@@ -495,13 +499,63 @@ async function monitorLoop() {
         }
       }
     } catch (e) {
-      await sleep(50);   // read failed (usually the reboot drop) - the loop reopens
+      break;   // dropped (usually the reboot re-enumeration)
     } finally {
       try { reader && reader.releaseLock(); } catch (e) {}
       logReader = null;
     }
-    await sleep(20);
+    if (!logOpen) break;
   }
+  try { if (logPort) await logPort.close(); } catch (e) {}
+  if (logOpen && !logReconnecting) enterReconnectWait();
+}
+
+// True if a port looks like our ESP32-S3 native USB-Serial-JTAG.
+function boardLike(p) {
+  const i = p && p.getInfo ? p.getInfo() : {};
+  return i.usbVendorId === BOARD_VID && i.usbProductId === BOARD_JTAG_PID;
+}
+
+// The board dropped off USB on reset. Wait for it to re-enumerate and reopen it. The
+// 'connect' event (onSerialConnect) is the primary trigger; we also poll getPorts as a
+// fallback, and show a one-click "Reconnect monitor" button.
+function enterReconnectWait() {
+  logReconnecting = true;
+  els.logReconnectBtn.hidden = false;
+  logLine("Board dropped off USB (reboot) - waiting for it to come back...", "dim");
+  pollReopen();
+}
+
+async function pollReopen() {
+  for (let i = 0; i < 120 && logOpen && logReconnecting; i++) {
+    await sleep(150);   // ~18s window
+    try {
+      const ports = await navigator.serial.getPorts();
+      const match = ports.find(boardLike) || (logPort && ports.indexOf(logPort) >= 0 ? logPort : null);
+      if (match) { await resumeLog(match); return; }
+    } catch (e) { /* keep waiting */ }
+  }
+}
+
+// Reopen the monitor on a returning port and resume streaming.
+async function resumeLog(p) {
+  if (!logOpen || !logReconnecting || !p) return;
+  logReconnecting = false;              // claim the reconnect (guards against double calls)
+  logLine("(reconnected)", "dim");
+  if (!(await attachLogPort(p))) {
+    logReconnecting = true;
+    els.logReconnectBtn.hidden = false;
+  }
+}
+
+// Manual fallback: let the user pick the returning port and resume on it.
+async function manualReconnect() {
+  if (!logOpen) return;
+  let p;
+  try { p = await navigator.serial.requestPort(); }
+  catch (e) { logLine("No port selected.", "warn"); return; }
+  logReconnecting = true;
+  await resumeLog(p);
 }
 
 // Save the console to a .txt file the user can download.
@@ -519,14 +573,20 @@ function saveLog() {
   URL.revokeObjectURL(url);
 }
 
-// When the board drops off USB on reset, cancel the current read so the monitor
-// loop unblocks and moves to reopening the port.
+// When the monitored board drops off USB (reset), cancel the current read so the read
+// loop unblocks and moves into the reconnect wait.
 function onSerialDisconnect(e) {
   const p = e.target || e.port;
   if (logOpen && logPort && p === logPort) {
-    logLine("Board dropped off USB (reboot) - waiting for it to come back...", "dim");
     try { if (logReader) logReader.cancel(); } catch (err) {}
   }
+}
+
+// When a previously-authorized port re-appears and we are waiting to reconnect, resume
+// the monitor on it if it is our board (or the same port handle).
+function onSerialConnect(e) {
+  const p = e.target || e.port;
+  if (logOpen && logReconnecting && p && (p === logPort || boardLike(p))) resumeLog(p);
 }
 
 // Reboot the board we are monitoring (RTS pulse on the log port), keep streaming.
@@ -593,7 +653,9 @@ function init() {
 
   els.logOpenBtn.addEventListener("click", () => (logOpen ? closeLogs() : openLogs()));
   els.logResetBtn.addEventListener("click", resetLogs);
+  els.logReconnectBtn.addEventListener("click", manualReconnect);
   navigator.serial.addEventListener("disconnect", onSerialDisconnect);
+  navigator.serial.addEventListener("connect", onSerialConnect);
   els.clearLogBtn.addEventListener("click", () => { els.console.textContent = ""; });
   els.copyLogBtn.addEventListener("click", () => navigator.clipboard.writeText(els.console.textContent));
   els.saveLogBtn.addEventListener("click", saveLog);
