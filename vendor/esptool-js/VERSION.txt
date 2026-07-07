@@ -1,0 +1,4 @@
+esptool-js 0.6.0 (vendored, pinned)
+Source: https://www.npmjs.com/package/esptool-js
+File: bundle.js is the self-contained ESM build (no runtime deps).
+Do not edit. To update: npm pack esptool-js@<ver>, copy package/bundle.js here, bump this file.

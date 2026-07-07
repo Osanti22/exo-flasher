@@ -4,368 +4,150 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Exoskeleton Firmware Flasher</title>
-
-  <!-- ESP Web Tools v10 (WebSerial-based flasher). Self-hosted CDN module, no other externals. -->
-  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
-
-  <style>
-    :root {
-      --bg: #0f172a;
-      --panel: #ffffff;
-      --ink: #1e293b;
-      --muted: #64748b;
-      --brand: #2563eb;
-      --brand-dark: #1d4ed8;
-      --ok: #16a34a;
-      --warn-bg: #fef9c3;
-      --warn-border: #eab308;
-      --req-bg: #eff6ff;
-      --req-border: #3b82f6;
-      --code-bg: #0f172a;
-      --code-ink: #e2e8f0;
-    }
-
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      line-height: 1.55;
-      color: var(--ink);
-      background: linear-gradient(160deg, #0f172a 0%, #1e293b 55%, #334155 100%);
-      background-attachment: fixed;
-      padding: 32px 16px 64px;
-    }
-
-    .wrap {
-      max-width: 720px;
-      margin: 0 auto;
-    }
-
-    header {
-      text-align: center;
-      color: #f8fafc;
-      margin-bottom: 24px;
-    }
-
-    header h1 {
-      font-size: clamp(1.5rem, 4vw, 2.1rem);
-      margin: 0 0 8px;
-      letter-spacing: -0.02em;
-    }
-
-    header p {
-      margin: 0 auto;
-      max-width: 34rem;
-      color: #cbd5e1;
-      font-size: 1rem;
-    }
-
-    .card {
-      background: var(--panel);
-      border-radius: 16px;
-      padding: 24px;
-      margin: 18px 0;
-      box-shadow: 0 10px 30px rgba(2, 6, 23, 0.28);
-    }
-
-    h2 {
-      font-size: 1.15rem;
-      margin: 0 0 12px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    label.field-label {
-      display: block;
-      font-weight: 600;
-      margin-bottom: 6px;
-      font-size: 0.95rem;
-    }
-
-    select#version {
-      width: 100%;
-      padding: 12px 14px;
-      font-size: 1rem;
-      border: 1.5px solid #cbd5e1;
-      border-radius: 10px;
-      background: #f8fafc;
-      color: var(--ink);
-      cursor: pointer;
-      -webkit-appearance: menulist;
-      appearance: menulist;
-    }
-
-    select#version:focus {
-      outline: 3px solid rgba(37, 99, 235, 0.35);
-      border-color: var(--brand);
-    }
-
-    .flash-row {
-      text-align: center;
-      margin-top: 20px;
-    }
-
-    /* Styled button that lives in the install-button's default slot */
-    button.flash-btn {
-      appearance: none;
-      border: none;
-      cursor: pointer;
-      font-size: 1.05rem;
-      font-weight: 700;
-      color: #ffffff;
-      background: var(--brand);
-      padding: 14px 28px;
-      border-radius: 12px;
-      box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
-      transition: background 0.15s ease, transform 0.05s ease;
-    }
-    button.flash-btn:hover { background: var(--brand-dark); }
-    button.flash-btn:active { transform: translateY(1px); }
-
-    .unsupported {
-      background: #fee2e2;
-      border: 1.5px solid #ef4444;
-      color: #991b1b;
-      padding: 14px 16px;
-      border-radius: 10px;
-      text-align: left;
-      font-size: 0.95rem;
-    }
-
-    .hint {
-      color: var(--muted);
-      font-size: 0.88rem;
-      margin-top: 12px;
-    }
-
-    /* Requirements box — friendly & prominent */
-    .requirements {
-      background: var(--req-bg);
-      border: 1.5px solid var(--req-border);
-      border-radius: 14px;
-    }
-    .requirements h2 { color: var(--brand-dark); }
-    .requirements ul { margin: 0; padding-left: 1.25rem; }
-    .requirements li { margin: 10px 0; }
-    .requirements strong { color: var(--ink); }
-
-    .badge {
-      display: inline-block;
-      font-size: 0.75rem;
-      font-weight: 700;
-      padding: 2px 8px;
-      border-radius: 999px;
-      background: #dcfce7;
-      color: #166534;
-      vertical-align: middle;
-    }
-    .badge.no {
-      background: #fee2e2;
-      color: #991b1b;
-    }
-
-    .confirm {
-      background: #f0fdf4;
-      border: 1.5px solid var(--ok);
-      border-radius: 14px;
-    }
-    .confirm h2 { color: #15803d; }
-
-    pre.boot {
-      background: var(--code-bg);
-      color: var(--code-ink);
-      padding: 14px 16px;
-      border-radius: 10px;
-      overflow-x: auto;
-      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-      font-size: 0.82rem;
-      line-height: 1.5;
-      margin: 12px 0;
-      white-space: pre;
-    }
-
-    .troubleshoot ul { margin: 0; padding-left: 1.25rem; }
-    .troubleshoot li { margin: 9px 0; }
-
-    kbd {
-      background: #1e293b;
-      color: #f8fafc;
-      border-radius: 5px;
-      padding: 1px 7px;
-      font-family: ui-monospace, monospace;
-      font-size: 0.82rem;
-    }
-
-    footer {
-      text-align: center;
-      color: #94a3b8;
-      font-size: 0.8rem;
-      margin-top: 28px;
-    }
-
-    a { color: var(--brand); }
-  </style>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>" />
+  <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
   <div class="wrap">
     <header>
+      <div class="logo">⚡</div>
       <h1>Exoskeleton Firmware Flasher</h1>
       <p>
-        Flash an exoskeleton unit straight from your browser — no downloads, no
-        command line. Plug in over USB, pick a version, and click one button.
+        Flash an Edgerun exoskeleton controller straight from your browser over USB.
+        Connect, pick the firmware file we sent you, and watch it flash. Nothing is
+        uploaded to a server.
       </p>
     </header>
 
-    <!-- ============ FLASH CARD ============ -->
-    <section class="card">
-      <h2>Flash a unit</h2>
-
-      <label class="field-label" for="version">Firmware version</label>
-      <select id="version" aria-label="Firmware version"></select>
-
-      <div class="flash-row">
-        <!--
-          The manifest attribute is set from JS (see FIRMWARE_VERSIONS below).
-          The default-slot <button> is what testers click; the "unsupported"
-          slot shows automatically when the browser can't do WebSerial.
-        -->
-        <esp-web-install-button id="installer" manifest="./manifest.json">
-          <button class="flash-btn" slot="activate">Connect &amp; Flash</button>
-          <div slot="unsupported" class="unsupported">
-            <strong>This browser can't flash.</strong> WebSerial isn't available
-            here. Please open this page in <strong>Google Chrome</strong> or
-            <strong>Microsoft Edge</strong> on a desktop computer (see
-            requirements below).
-          </div>
-          <div slot="not-allowed" class="unsupported">
-            <strong>WebSerial is blocked.</strong> This page must be served over
-            <strong>https://</strong> (GitHub Pages is fine). If you opened the
-            file directly from disk, that won't work.
-          </div>
-        </esp-web-install-button>
-        <p class="hint">
-          Calibration is preserved — flashing does <strong>not</strong> erase the
-          unit's per-unit settings stored in flash.
-        </p>
-      </div>
-    </section>
-
-    <!-- ============ REQUIREMENTS ============ -->
-    <section class="card requirements">
-      <h2>Before you start — please read</h2>
-      <ul>
-        <li>
-          <strong>Use the right browser.</strong>
-          <span class="badge">Chrome</span>
-          <span class="badge">Edge</span> on a desktop/laptop — or Chrome 148+ on
-          Android with a USB-C OTG cable.
-          <br />
-          <span class="badge no">Safari</span>
-          <span class="badge no">iPhone / iPad</span>
-          <span class="badge no">Firefox</span> will <strong>not</strong> work.
-        </li>
-        <li>
-          <strong>Use a DATA USB cable</strong> — not a charge-only cable. Many
-          cheap cables only carry power and the unit will never appear. Plug the
-          exoskeleton unit into this computer.
-        </li>
-        <li>
-          <strong>Then click Connect &amp; Flash</strong>, choose the serial port
-          in the browser's pop-up prompt, and wait about
-          <strong>30–60 seconds</strong>. Don't unplug it while it's flashing.
-        </li>
-      </ul>
-    </section>
-
-    <!-- ============ CONFIRM SUCCESS ============ -->
-    <section class="card confirm">
-      <h2>How to confirm it worked</h2>
+    <!-- Shown when the browser has no WebSerial ------------------------------ -->
+    <div id="unsupported" class="unsupported" hidden>
+      <h2>This browser can't flash</h2>
       <p>
-        When flashing finishes, click <strong>“Logs &amp; Console”</strong> in the
-        dialog and watch the boot messages. You've succeeded if you see
-        <em>either</em> of these lines:
+        WebSerial is not available here. Open this page in <strong>Google Chrome</strong>
+        or <strong>Microsoft Edge</strong> on a desktop computer, over <strong>https://</strong>
+        (this GitHub Pages site is fine). Safari, iPhone/iPad and Firefox will not work.
       </p>
-      <pre class="boot">IMU LH up (V3.1 single: cs=17, rst/wake0 via PCA9534@0x20, no-INT, accel+gyro+rotvec)
-IMU LH up (Version#1 single: cs=17, rst=8 wake=18 direct-GPIO, no-INT, accel+gyro+rotvec)</pre>
-      <p class="hint">
-        You'll only ever see one of them — the firmware
-        <strong>auto-detects which board revision it's running on</strong> (V3.1 or
-        Version #1) and configures the IMU accordingly. The <em>same</em> image
-        works on both board revisions, so you don't need to know which one you have.
-      </p>
-    </section>
+    </div>
 
-    <!-- ============ TROUBLESHOOTING ============ -->
-    <section class="card troubleshoot">
-      <h2>Troubleshooting</h2>
-      <ul>
-        <li>
-          <strong>The port doesn't appear in the pop-up?</strong> Try a different
-          USB cable (must be a data cable) and a different USB port.
-        </li>
-        <li>
-          <strong>The unit disconnects and reconnects on its own?</strong> A
-          factory-blank board can briefly drop off and rejoin the USB bus — that's
-          normal. Just try Connect &amp; Flash again.
-        </li>
-        <li>
-          <strong>A badly-flashed unit won't connect at all?</strong> Hold the
-          <kbd>BOOT</kbd> button on the unit while you plug it in (keep it held
-          until the port appears), then release and click Connect &amp; Flash.
-        </li>
-      </ul>
-    </section>
+    <div id="app">
+      <!-- ============ 1. CONNECT ============ -->
+      <section class="card">
+        <h2><span class="num">1</span> Connect the unit</h2>
+        <div class="row between">
+          <span id="statusPill" class="pill">Disconnected</span>
+          <div class="row">
+            <button id="connectBtn" class="primary">Connect</button>
+            <button id="disconnectBtn" class="ghost" hidden>Disconnect</button>
+          </div>
+        </div>
+
+        <div id="deviceInfo" class="device-info" hidden>
+          <div class="di-item"><div class="k">Chip</div><div class="v" id="diChip">-</div></div>
+          <div class="di-item"><div class="k">Revision</div><div class="v" id="diRev">-</div></div>
+          <div class="di-item"><div class="k">MAC address</div><div class="v" id="diMac">-</div></div>
+          <div class="di-item"><div class="k">Flash size</div><div class="v" id="diFlash">-</div></div>
+          <div class="di-item" style="grid-column: 1 / -1;"><div class="k">Features</div><div class="v" id="diFeatures">-</div></div>
+        </div>
+      </section>
+
+      <!-- ============ 2. FIRMWARE + FLASH ============ -->
+      <section class="card">
+        <h2><span class="num">2</span> Choose the firmware file and flash</h2>
+
+        <label class="field-label">Firmware image (.bin)</label>
+        <div id="fileDrop" class="filedrop">
+          <input id="fileInput" type="file" accept=".bin" />
+          Drag the <code>.bin</code> we sent you here, or
+          <label for="fileInput">browse</label> for it on your computer.
+          <div id="fileMeta" class="file-meta" hidden></div>
+        </div>
+        <p class="notes">
+          The file is read in your browser and flashed over USB. It is never uploaded
+          anywhere. Use the exact merged image we provided (bootloader through www).
+        </p>
+
+        <div class="callout">
+          <span class="ic">🛡️</span>
+          <span>Calibration is preserved. This does <strong>not</strong> erase the unit's
+          per-unit settings (encoder offsets, IMU cal) stored in flash.</span>
+        </div>
+
+        <div class="row">
+          <button id="flashBtn" class="primary" disabled>Flash</button>
+          <button id="monitorBtn" hidden>Open serial monitor</button>
+        </div>
+
+        <div id="progressWrap" class="progress" hidden>
+          <div class="track"><div id="progressBar" class="bar"></div></div>
+          <div class="meta">
+            <span id="progressPhase">Idle</span>
+            <span id="progressPct" class="pct">0%</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 3. GUIDE / LOGS ============ -->
+      <section class="card">
+        <div class="tabs">
+          <button id="tabGuide" class="tab active">Guide</button>
+          <button id="tabLogs" class="tab">Logs &amp; console<span id="logBadge" class="badge" hidden>IMU OK</span></button>
+        </div>
+
+        <!-- Guide tab -->
+        <div id="panelGuide" class="guide">
+          <h3>Before you start</h3>
+          <ul>
+            <li>
+              <strong>Use the right browser.</strong>
+              <span class="badge-yes">Chrome</span> <span class="badge-yes">Edge</span>
+              on desktop, or Chrome 148+ on Android with a USB-C OTG cable.
+              <span class="badge-no">Safari</span> <span class="badge-no">iPhone/iPad</span>
+              <span class="badge-no">Firefox</span> will not work.
+            </li>
+            <li><strong>Use a DATA USB cable</strong>, not a charge-only one. If the unit
+              never appears in the port picker, the cable is the usual cause.</li>
+            <li><strong>Click Connect</strong>, pick the serial port in the pop-up, then
+              flash. The image is about 9.6 MB and takes roughly a minute.</li>
+          </ul>
+
+          <h3>How to confirm it worked</h3>
+          <p style="color: var(--ink-dim);">
+            After flashing, click <strong>Open serial monitor</strong> and watch the boot log
+            (or the Logs tab). You succeeded if you see either of these lines:
+          </p>
+          <pre class="boot">IMU LH up (V3.1 single: cs=17, rst/wake0 via PCA9534@0x20, no-INT, accel+gyro+rotvec)
+IMU LH up (Version#1 single: cs=17, rst=8 wake=18 direct-GPIO, no-INT, accel+gyro+rotvec)</pre>
+          <p style="color: var(--ink-dim);">
+            You only ever see one. The same image works on both board revisions - the
+            firmware auto-detects V3.1 or Version #1 and picks the right IMU driver.
+          </p>
+
+          <h3>Troubleshooting</h3>
+          <ul>
+            <li><strong>Port doesn't appear?</strong> Try a different data cable and USB port.</li>
+            <li><strong>Unit disconnects and reconnects on its own?</strong> A blank board can
+              briefly drop off the USB bus. Just click Connect again.</li>
+            <li><strong>A badly-flashed unit won't connect?</strong> Hold <kbd>BOOT</kbd> while
+              plugging in (keep it held until the port appears), then release and Connect.</li>
+          </ul>
+        </div>
+
+        <!-- Logs tab -->
+        <div id="panelLogs" hidden>
+          <div class="console-tools">
+            <button id="clearLogBtn" class="small">Clear</button>
+            <button id="copyLogBtn" class="small">Copy</button>
+          </div>
+          <div id="console" class="console" aria-live="polite"></div>
+        </div>
+      </section>
+    </div>
 
     <footer>
-      Exoskeleton Firmware Flasher · powered by ESP Web Tools · works over WebSerial in Chrome/Edge
+      Exoskeleton Firmware Flasher · flashing over WebSerial with esptool-js · works in Chrome/Edge
     </footer>
   </div>
 
-  <script>
-    // ==========================================================================
-    //  FIRMWARE VERSIONS
-    //  To add a future version: add another { label, manifest } entry to this
-    //  array. The newest/most-recommended version should be listed FIRST — it is
-    //  selected by default. Each manifest is a separate .json file next to this
-    //  page (see manifest.json for the format).
-    // ==========================================================================
-    const FIRMWARE_VERSIONS = [
-      {
-        label: "d0ee616 — S3 autodetect (V3.1 & v2.6) — recommended",
-        manifest: "./manifest.json"
-      },
-      {
-        label: "develop 2.2.0 — v2.6 boards (ship) · no IMU on V3.1",
-        manifest: "./manifest-develop-ship.json"
-      },
-      {
-        label: "develop 2.2.0 — sample #2 (v2.6, no-WAKE IMU)",
-        manifest: "./manifest-develop-sample2.json"
-      }
-    ];
-
-    const select = document.getElementById("version");
-    const installer = document.getElementById("installer");
-
-    // Populate the dropdown from the array above.
-    FIRMWARE_VERSIONS.forEach((v, i) => {
-      const opt = document.createElement("option");
-      opt.value = String(i);
-      opt.textContent = v.label;
-      select.appendChild(opt);
-    });
-
-    // Point the install button at the manifest for the chosen version.
-    function applyManifest() {
-      const chosen = FIRMWARE_VERSIONS[Number(select.value)] || FIRMWARE_VERSIONS[0];
-      installer.setAttribute("manifest", chosen.manifest);
-    }
-
-    select.addEventListener("change", applyManifest);
-    applyManifest(); // set initial manifest to match the default-selected option
-  </script>
+  <script type="module" src="./app.js"></script>
 </body>
 </html>

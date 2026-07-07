@@ -1,0 +1,3 @@
+# Firmware images are never hosted here. They are sent to the client directly
+# and the client picks the .bin from their own PC in the flasher.
+*.bin

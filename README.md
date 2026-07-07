@@ -1,16 +1,22 @@
 # Exo Flasher
 
 A **browser-based USB flasher** for the Edgerun exoskeleton controller (ESP32-S3).
-Open a web page, plug in a unit, click **Flash** — done. No downloads, no command
+Open a web page, plug in a unit, click **Flash** - done. No downloads, no command
 line, no ESP-IDF, no drivers to install.
 
 Live page: **https://osanti22.github.io/exo-flasher/**
 
-The site is fully static (just `index.html`, `manifest.json`, and a firmware `.bin`),
-served by GitHub Pages. All the flashing happens locally in your browser over
-[WebSerial](https://developer.mozilla.org/en-US/docs/Web/API/Web_Serial_API) via
-[ESP Web Tools](https://esphome.github.io/esp-web-tools/). Nothing is uploaded to a
-server.
+The site is fully static (`index.html`, `styles.css`, `app.js`, and a vendored copy of
+esptool-js), served by GitHub Pages. All the flashing happens locally in your browser
+over [WebSerial](https://developer.mozilla.org/en-US/docs/Web/API/Web_Serial_API) with
+[esptool-js](https://github.com/espressif/esptool-js). Nothing is uploaded to a server.
+
+**No firmware is hosted here.** The `.bin` files are not in this repo and not on the
+page - they are sent to the client directly, and the client picks the file from their
+own PC to flash it. This keeps the images off the public site.
+
+The page also shows a live progress bar, a Logs and console tab (including the board's
+boot log after flashing), and the connected device's info (chip, MAC, flash size).
 
 ---
 
@@ -23,37 +29,36 @@ cable, and about a minute.
 
 WebSerial is a Chromium feature, so you must use one of:
 
-- **Chrome** or **Edge** on desktop (Windows, macOS, Linux) — recommended
+- **Chrome** or **Edge** on desktop (Windows, macOS, Linux) - recommended
 - **Chrome 148 or newer on Android**
 
 It will **not** work in:
 
-- **Safari** (any version) or **anything on iPhone / iPad** — iOS has no WebSerial
-- **Firefox** — no WebSerial support
+- **Safari** (any version) or **anything on iPhone / iPad** - iOS has no WebSerial
+- **Firefox** - no WebSerial support
 
 ### 2. Use a real data USB cable
 
 Many cheap USB cables are **charge-only** and carry power but no data. If the board
-never shows up in the port picker, the cable is the usual culprit — swap it for one
+never shows up in the port picker, the cable is the usual culprit - swap it for one
 you know can transfer data.
 
 ### 3. Flash it
 
-1. Go to **https://osanti22.github.io/exo-flasher/**
-2. Plug the exoskeleton unit into your computer/phone with the USB cable.
-3. (Optional) Pick the firmware version you want from the version dropdown. The
-   default is the latest.
-4. Click **Connect / Flash** (or "Install").
-5. In the browser's port picker, choose the serial port for the board
-   (often shown as *USB JTAG/serial debug unit* or a `USB Serial` / `ttyACM` /
-   `COM` device) and click **Connect**.
-6. Confirm the install prompt and wait. Flashing the ~9.6 MB image takes roughly
-   a minute. Do not unplug the board while it runs.
+1. Save the firmware `.bin` we sent you somewhere you can find it.
+2. Go to **https://osanti22.github.io/exo-flasher/**
+3. Plug the exoskeleton unit into your computer/phone with the USB cable.
+4. Click **Connect** and, in the browser's port picker, choose the serial port for
+   the board (often shown as *USB JTAG/serial debug unit* or a `USB Serial` /
+   `ttyACM` / `COM` device). The page then shows the board's chip, MAC, and flash size.
+5. Pick the firmware `.bin` we sent you (drag it onto the page or browse for it).
+6. Click **Flash** and watch the progress bar. The ~9.6 MB image takes roughly a
+   minute. Do not unplug the board while it runs.
 
 ### 4. Confirm it worked
 
-Open the **Logs** console on the page (ESP Web Tools shows the device's serial
-output after flashing). The board reboots on its own and prints its boot banner.
+When flashing finishes, click **Open serial monitor** (or the **Logs and console**
+tab). The board reboots into the new firmware and prints its boot banner.
 
 Look for the **IMU boot line**. It will be one of these two, depending on the
 hardware revision the board auto-detects:
@@ -69,7 +74,7 @@ IMU LH up (Version#1 single: ... direct-GPIO ...)
 ```
 
 Either line means the firmware booted and brought the IMU up successfully. You do
-**not** need to know which board you have — the firmware detects its own hardware
+**not** need to know which board you have - the firmware detects its own hardware
 revision at boot and picks the right driver. Seeing one of those two lines is your
 "success" signal.
 
@@ -80,86 +85,56 @@ shows and report it.
 
 ## For maintainers
 
-### Publishing a new firmware version
+### Making an image to send to a client
 
-Use the included helper, `publish.sh`. It takes an ESP-IDF **build directory** and a
-short **version label** (a git short SHA or a tag), merges the images into a single
-flashable `.bin`, and writes a matching manifest:
+Firmware is not hosted here. To turn an ESP-IDF build into one flashable file, use
+`build-image.sh`. It takes the **build directory** and a short **label** and merges
+the 5 build artifacts into a single `.bin`:
 
 ```bash
-./publish.sh /path/to/firmware/build d0ee616
+./build-image.sh /path/to/firmware/build d0ee616
 ```
 
-That produces, in the repo root:
-
-- `exo-fw-d0ee616-esp32s3.bin` — the merged, flashable image
-- `manifest-d0ee616.json` — the ESP Web Tools manifest pointing at that bin
-
-The script does **not** commit or push. After it runs, do the three manual steps it
-reminds you about:
-
-1. Add a dropdown entry in `index.html` (see below).
-2. `git add -A`
-3. `git commit -m "Add firmware d0ee616" && git push`
-
-Once pushed, GitHub Pages redeploys the new files automatically (usually within a
-minute).
+By default the file is written to the repo's **parent** directory
+(`../exo-fw-d0ee616-esp32s3.bin`) so it never lands inside the repo. Use `-o <path>`
+to put it somewhere else. Send that file to the client - they pick it from their PC in
+the page and flash it. Nothing is committed and nothing is hosted. (As a backstop,
+`.gitignore` blocks `*.bin` from ever being committed.)
 
 > The build directory is the ESP-IDF `build/` folder and must contain:
 > `bootloader/bootloader.bin`, `partition_table/partition-table.bin`,
 > `ota_data_initial.bin`, `exoskeleton_main_firmware.bin`, and `www.bin`.
 
-### Manifest format
+### How the flash write is set up
 
-The manifest is a standard [ESP Web Tools](https://esphome.github.io/esp-web-tools/)
-manifest. `manifest.json` (the current default) looks like this:
+The page flashes every image the same way, and it is deliberate:
 
-```json
-{
-  "name": "Exoskeleton Firmware",
-  "version": "d0ee616 — S3 board autodetect (V3.1 + Version #1)",
-  "new_install_prompt_erase": false,
-  "builds": [
-    {
-      "chipFamily": "ESP32-S3",
-      "parts": [
-        { "path": "exo-fw-d0ee616-esp32s3.bin", "offset": 0 }
-      ]
-    }
-  ]
-}
+- **One merged bin, written whole at offset 0.** All the segments (bootloader,
+  partition table, OTA data, app, web assets) are already baked into the single file
+  at their correct offsets, so the flasher writes it starting at address 0.
+- **No full erase, and the header is left as-is.** `app.js` flashes with
+  `eraseAll: false` and `flashMode/flashFreq/flashSize: "keep"`, so esptool-js writes
+  the bytes unchanged. A full erase would wipe **NVS**, where each unit's
+  **calibration** (encoder offsets, IMU cal) lives. The merged image ends at
+  `0x930000`; everything above it, including calibration, is never touched.
+
+This lives in the `writeFlash` call in `app.js`. Do not change it to an erase-all or
+per-segment write without the real partition table, or you can wipe calibration.
+
+### Updating esptool-js
+
+esptool-js is vendored under `vendor/esptool-js/` so there is no build step and no
+runtime CDN dependency. To bump it:
+
+```bash
+npm pack esptool-js@<version>
+tar xzf esptool-js-<version>.tgz
+cp package/bundle.js vendor/esptool-js/bundle.js
+# then update vendor/esptool-js/VERSION.txt
 ```
 
-Key points:
-
-- **`chipFamily` is `ESP32-S3`** — these are S3 boards.
-- The image is a **merged bin flashed at `offset` 0**. All the individual segments
-  (bootloader, partition table, OTA data, app, web assets) are already baked into
-  the single file at their correct offsets, so ESP Web Tools just writes it starting
-  at address 0.
-- **`new_install_prompt_erase` is `false`** — this is deliberate. A full chip erase
-  would wipe **NVS**, where each unit's **calibration** (encoder offsets, IMU cal,
-  etc.) is stored. Leaving it `false` preserves per-unit calibration across a
-  firmware update.
-
-### The version dropdown in `index.html`
-
-`index.html` keeps a small JavaScript array of the versions offered in the dropdown.
-Each entry is a `{ label, manifest }` object, where `manifest` is a relative path to
-a manifest file in this repo. It looks roughly like:
-
-```js
-const FIRMWARE_VERSIONS = [
-  { label: "d0ee616 (latest) — S3 autodetect", manifest: "./manifest.json" },
-  // add newer builds at the top:
-  // { label: "<LABEL> — short description", manifest: "./manifest-<LABEL>.json" },
-];
-```
-
-To expose a version you just published, add a new `{ label, manifest }` entry
-pointing at the `manifest-<LABEL>.json` that `publish.sh` created. Put newer builds
-at the top so the newest is the default. `publish.sh` prints the exact snippet to
-paste.
+Keep using `bundle.js` - it is the self-contained ESM build with no bare imports, so
+it works directly in the browser.
 
 ---
 
@@ -167,12 +142,12 @@ paste.
 
 - **Chromium + HTTPS only.** WebSerial exists only in Chromium browsers (Chrome,
   Edge, Chrome for Android) and only over HTTPS (or `localhost`). GitHub Pages
-  serves the site over HTTPS, so that requirement is already met — but Safari,
+  serves the site over HTTPS, so that requirement is already met - but Safari,
   iOS, and Firefox simply cannot flash.
-- **The firmware binaries are PUBLIC.** This is a public repo on a public Pages
-  site; anyone can download the `.bin`. **Never publish a firmware image that
-  embeds secrets, private keys, Wi-Fi credentials, or tokens.** If a build bakes in
-  anything sensitive, it does not belong here.
+- **Firmware is never hosted here.** This is a public repo on a public Pages site, so
+  no `.bin` goes in it - `.gitignore` blocks `*.bin` as a backstop. Send images to the
+  client directly and let them pick the file from their PC. (Note: earlier commits did
+  contain firmware images before this change; those remain in git history.)
 - **This is USB flashing, not OTA.** This tool is a *host-push* flow: your computer
   pushes firmware to the board over the USB cable. It is completely separate from
   the exoskeleton's over-the-air update path, which is *device-pull* (the device
@@ -196,5 +171,5 @@ gh api -X POST repos/Osanti22/exo-flasher/pages \
   -f 'source[path]=/'
 ```
 
-After that, every future release is just: run `publish.sh`, edit `index.html`,
-commit, and push.
+After that, changes to the page are just: edit the files, commit, and push. To make a
+firmware image for a client, run `build-image.sh` and send them the resulting `.bin`.

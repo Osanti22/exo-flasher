@@ -1,8 +1,0 @@
-{
-  "name": "Exoskeleton Firmware — develop (sample #2 / no-WAKE)",
-  "version": "develop 2.2.0 · v2.6 sample #2 (CONFIG_EXO_IMU_NO_WAKE) · safe on V3.1 (IMU skipped there)",
-  "new_install_prompt_erase": false,
-  "builds": [
-    { "chipFamily": "ESP32-S3", "parts": [ { "path": "exo-fw-develop-sample2-esp32s3.bin", "offset": 0 } ] }
-  ]
-}
