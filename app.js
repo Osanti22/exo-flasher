@@ -332,6 +332,7 @@ async function flash() {
   flashing = true;
   els.flashBtn.disabled = true;
   els.progressWrap.hidden = false;
+  els.progressBar.classList.remove("done", "failed");   // reset any finished state
   setStatus("Flashing", "busy");
   setProgress(0, "Reading firmware");
 
@@ -363,7 +364,8 @@ async function flash() {
       },
     });
 
-    setProgress(1, "Done");
+    setProgress(1, "Flash complete");
+    els.progressBar.classList.add("done");   // stop the moving stripes, show a solid bar
     setStatus("Flashed OK", "ok");
     logLine("Flash complete. Resetting into the new firmware and starting the log...", "ok");
     flashing = false;                 // done writing; the auto-reset/log step follows
@@ -372,6 +374,7 @@ async function flash() {
     logLine("Flash failed: " + (e.message || e), "err");
     setStatus("Flash failed", "err");
     setProgress(0, "Failed");
+    els.progressBar.classList.add("failed");
   } finally {
     flashing = false;
     updateFlashEnabled();

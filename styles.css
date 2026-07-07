@@ -216,6 +216,17 @@ label.field-label { display: block; font-weight: 600; font-size: 0.9rem; margin-
     repeating-linear-gradient(45deg, rgba(255,255,255,0.16) 0 8px, transparent 8px 16px);
 }
 @keyframes stripes { from { background-position: 0 0; } to { background-position: 40px 0; } }
+/* Finished states: stop the moving stripes and show a solid bar. */
+.progress .bar.done {
+  animation: none;
+  background-image: none;
+  background: linear-gradient(90deg, var(--ok) 0%, #34d399 100%);
+}
+.progress .bar.failed {
+  animation: none;
+  background-image: none;
+  background: linear-gradient(90deg, var(--err) 0%, #f87171 100%);
+}
 .progress .meta { display: flex; justify-content: space-between; margin-top: 8px; font-size: 0.85rem; color: var(--ink-dim); }
 .progress .meta .pct { font-family: var(--mono); color: var(--ink); }
 
