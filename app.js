@@ -119,12 +119,20 @@ function updateFlashEnabled() {
 async function connect() {
   if (flashing) return;
   if (connected) await hardCleanup();   // "Reconnect": drop the old port first
+  let chosen;
   try {
-    port = await navigator.serial.requestPort();
+    chosen = await navigator.serial.requestPort();
   } catch (e) {
     logLine("No port selected.", "warn");
     return;
   }
+  // If the log monitor is already open on this same device, gently close it so we
+  // can flash on it. A different device is left alone (flash + log can coexist).
+  if (logOpen && chosen === logPort) {
+    logLine("This port is open in the log monitor - closing the monitor so it can flash.", "dim");
+    await closeLogs();
+  }
+  port = chosen;
 
   // Auto-reset into the bootloader, no button press. esptool-js picks the reset by
   // USB PID: a native USB-Serial-JTAG board (PID 0x1001) gets the USB-JTAG reset,
@@ -270,18 +278,26 @@ async function flash() {
 // ---------------------------------------------------------------------------
 async function openLogs() {
   if (logOpen) return;
+  let chosen;
   try {
-    logPort = await navigator.serial.requestPort();
+    chosen = await navigator.serial.requestPort();
   } catch (e) {
     logLine("No log port selected.", "warn");
     return;
   }
+  // If the flash connection holds this same device, gently release it so we can
+  // log on it. A different device is left alone (flash + log can coexist).
+  if (port && chosen === port) {
+    logLine("This port is used for flashing - closing the flash connection so it can log.", "dim");
+    await hardCleanup();
+  }
+  logPort = chosen;
   const baud = parseInt(els.logBaud.value, 10) || 115200;
   try {
     await logPort.open({ baudRate: baud });
   } catch (e) {
     logLine("Could not open the log port: " + (e.message || e) +
-      " - if this is the flashing port, click Disconnect first.", "err");
+      " - another program may be using it (idf.py monitor, Arduino IDE, PuTTY).", "err");
     logPort = null;
     return;
   }
