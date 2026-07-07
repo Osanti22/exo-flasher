@@ -31,7 +31,7 @@ const FLASH_OFFSET = 0;      // Recovery: merged image written whole at 0 (bootl
 const OTADATA_OFFSET = 0xf000;
 const APP_OFFSET = 0x20000;
 const WWW_OFFSET = 0x830000;
-const OTADATA_MAX = 0x2000;   // ota_data partition is 2 sectors (8 KB); reject anything bigger
+const OTADATA_SIZE = 0x2000;  // ota_data partition is 2 sectors (8 KB); we write it blank (0xFF)
 
 // The "IMU LH up" lines the firmware prints on a good boot. Success is one of these.
 const IMU_OK = "IMU LH up";
@@ -49,9 +49,9 @@ let connected = false;    // true once we are synced with the bootloader
 let flashing = false;
 let flashMode = "update"; // "update" (keep nvs) | "recovery" (full merged image)
 let localFile = null;     // Recovery: the merged .bin
-let appImg = null;        // Update: app image     -> 0x20000 (required)
-let otadataImg = null;    // Update: ota_data image -> 0xf000 (required)
-let wwwImg = null;        // Update: GUI image      -> 0x830000 (optional)
+let appImg = null;        // Update: app image -> 0x20000 (required)
+let wwwImg = null;        // Update: GUI image -> 0x830000 (optional)
+// Update also writes a blank ota_data (generated below), no file needed.
 
 // Log port (independent serial monitor)
 let logPort = null;
@@ -69,7 +69,7 @@ const els = {};
   "connectBtn", "disconnectBtn", "resetBtn",
   "deviceInfo", "diChip", "diRev", "diMac", "diFlash", "diFeatures",
   "modeUpdate", "modeRecovery", "modeHint", "modeCallout", "updatePanel", "recoveryPanel",
-  "appFile", "otadataFile", "wwwFile", "appFileName", "otadataFileName", "wwwFileName",
+  "appFile", "wwwFile", "appFileName", "wwwFileName",
   "fileInput", "fileDrop", "fileMeta",
   "flashBtn",
   "progressWrap", "progressBar", "progressPhase", "progressPct",
@@ -124,7 +124,7 @@ function pickFile(file) {
 }
 
 function updateFlashEnabled() {
-  const ready = flashMode === "recovery" ? !!localFile : (!!appImg && !!otadataImg);
+  const ready = flashMode === "recovery" ? !!localFile : !!appImg;
   els.flashBtn.disabled = !(connected && ready && !flashing);
 }
 
@@ -136,8 +136,8 @@ function setMode(mode) {
   els.recoveryPanel.hidden = mode !== "recovery";
   if (mode === "update") {
     els.modeHint.textContent =
-      "Writes the app and OTA data (and the GUI if you add it) as separate segments. " +
-      "Keeps calibration and WiFi. Use this for normal updates.";
+      "Writes the app (and the GUI if you add it) plus a fresh boot table, as separate " +
+      "segments. Keeps calibration and WiFi. Use this for normal updates.";
     els.modeCallout.className = "callout ok";
     els.modeCallout.innerHTML =
       "<span class='ic'>🛡️</span><span>Calibration and WiFi are <strong>preserved</strong> - " +
@@ -295,25 +295,25 @@ async function buildFileArray() {
     if (data[0] !== 0xe9) {
       logLine("Warning: merged image does not start with 0xE9 (ESP image magic). Is this a full image for offset 0?", "warn");
     }
-    return [{ data, address: FLASH_OFFSET }];
+    return [{ data, address: FLASH_OFFSET, name: "merged image" }];
   }
-  // Update mode: ota_data (0xf000), app (0x20000), optional www (0x830000).
+  // Update mode: blank ota_data (0xf000), app (0x20000), optional www (0x830000).
   const app = new Uint8Array(await appImg.arrayBuffer());
-  const ota = new Uint8Array(await otadataImg.arrayBuffer());
   if (app.length === 0) throw new Error("The app file is empty.");
   if (app[0] !== 0xe9) {
     throw new Error("App image does not start with 0xE9 (ESP image magic). Is this exoskeleton_main_firmware.bin?");
   }
-  if (ota.length === 0 || ota.length > OTADATA_MAX) {
-    throw new Error(`OTA data image is ${ota.length} bytes; expected the small init image (1..${OTADATA_MAX} bytes). Is this ota_data_initial.bin?`);
-  }
+  // Blank (all-0xFF) ota_data. With no factory partition, a blank boot selector makes
+  // the bootloader boot ota_0 - so the unit runs the app we just wrote, whatever slot
+  // it ran before. Generated in-browser; no ota_data file is needed.
+  const blankOta = new Uint8Array(OTADATA_SIZE).fill(0xff);
   const arr = [
-    { data: ota, address: OTADATA_OFFSET },   // 0xf000 - must be present, or the app slot may be ignored
-    { data: app, address: APP_OFFSET },       // 0x20000
+    { data: blankOta, address: OTADATA_OFFSET, name: "ota_data (blank, generated)" },   // 0xf000 - boots ota_0
+    { data: app, address: APP_OFFSET, name: "app" },                                    // 0x20000
   ];
   if (wwwImg) {
     const www = new Uint8Array(await wwwImg.arrayBuffer());
-    if (www.length > 0) arr.push({ data: www, address: WWW_OFFSET });   // 0x830000
+    if (www.length > 0) arr.push({ data: www, address: WWW_OFFSET, name: "www (GUI)" });   // 0x830000
   }
   return arr;
 }
@@ -321,7 +321,7 @@ async function buildFileArray() {
 async function flash() {
   if (!connected || flashing) return;
   if (flashMode === "recovery" && !localFile) return;
-  if (flashMode === "update" && !(appImg && otadataImg)) return;
+  if (flashMode === "update" && !appImg) return;
 
   if (flashMode === "recovery" &&
       !window.confirm("Recovery mode writes a full image and ERASES calibration and WiFi " +
@@ -346,7 +346,7 @@ async function flash() {
     } else {
       logLine("Update mode - writing segments, nvs at 0x9000 left untouched:", "dim");
     }
-    fileArray.forEach((f) => logLine(`  ${hex(f.address).padEnd(9)} ${(f.data.length / 1024).toFixed(1)} KB`, "dim"));
+    fileArray.forEach((f) => logLine(`  ${hex(f.address).padEnd(9)} ${(f.data.length / 1024).toFixed(1).padStart(7)} KB  ${f.name}`, "dim"));
     setProgress(0, "Erasing and writing");
 
     await esploader.writeFlash({
@@ -578,7 +578,6 @@ function init() {
   els.modeUpdate.addEventListener("click", () => setMode("update"));
   els.modeRecovery.addEventListener("click", () => setMode("recovery"));
   bindFileInput(els.appFile, els.appFileName, (f) => (appImg = f));
-  bindFileInput(els.otadataFile, els.otadataFileName, (f) => (otadataImg = f));
   bindFileInput(els.wwwFile, els.wwwFileName, (f) => (wwwImg = f));
 
   els.fileInput.addEventListener("change", (e) => pickFile(e.target.files[0]));

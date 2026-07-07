@@ -61,7 +61,7 @@
         </div>
         <p class="notes" id="modeHint"></p>
 
-        <!-- Update mode: app + ota_data (+ optional GUI), written as separate segments -->
+        <!-- Update mode: app (+ optional GUI). ota_data is generated in-browser. -->
         <div id="updatePanel">
           <div class="file-row">
             <div class="fr-label">App firmware <span class="req">required</span>
@@ -70,17 +70,15 @@
             <span class="file-name" id="appFileName">no file</span>
           </div>
           <div class="file-row">
-            <div class="fr-label">OTA data <span class="req">required</span>
-              <span class="fr-sub">ota_data_initial.bin &rarr; 0xf000</span></div>
-            <label class="choose-btn">Choose<input id="otadataFile" type="file" accept=".bin" /></label>
-            <span class="file-name" id="otadataFileName">no file</span>
-          </div>
-          <div class="file-row">
             <div class="fr-label">GUI <span class="opt">optional</span>
               <span class="fr-sub">www.bin &rarr; 0x830000</span></div>
             <label class="choose-btn">Choose<input id="wwwFile" type="file" accept=".bin" /></label>
             <span class="file-name" id="wwwFileName">no file</span>
           </div>
+          <p class="notes">
+            The boot table (ota_data at 0xf000) is written automatically - a blank 8 KB
+            table so the unit boots the app you flash. You do not need an ota_data file.
+          </p>
         </div>
 
         <!-- Recovery mode: one merged image written whole at 0x0 -->

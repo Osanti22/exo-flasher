@@ -55,7 +55,8 @@ you know can transfer data.
    `ttyACM` / `COM` device). The page then shows the board's chip, MAC, and flash size.
 5. Pick the mode:
    - **Update (default)** keeps the unit's calibration and WiFi. Choose the **app**
-     file and the **OTA data** file we sent (and the **GUI** file if we included one).
+     file we sent (and the **GUI** file if we included one). Nothing else - the boot
+     table is written for you.
    - **Recovery (full)** rewrites everything and **erases calibration and WiFi**. Only
      use it if we tell you to (a bricked or brand-new unit). It takes one merged `.bin`.
 6. Click **Flash** and watch the progress bar. Do not unplug the board while it runs.
@@ -98,9 +99,9 @@ The page has two modes. Send the client the files for the mode they need:
 
 - **Update** (default, keeps calibration + WiFi) writes only the changed partitions as
   separate segments and never touches `nvs` at `0x9000`. Send the raw build files:
-  `exoskeleton_main_firmware.bin` (app, required), `ota_data_initial.bin` (required),
-  and `www.bin` (GUI, optional). Sending `ota_data` is not optional - without it, a unit
-  that last booted the other OTA slot ignores the freshly written app.
+  `exoskeleton_main_firmware.bin` (app, required) and `www.bin` (GUI, optional). You do
+  NOT send `ota_data` - the page writes a blank `0x2000` boot table itself, which makes
+  the unit boot `ota_0` (the app you just wrote), whatever slot it ran before.
 - **Recovery** (full, erases calibration + WiFi) writes one merged image at `0x0`. Send
   the merged `.bin` from `build-image.sh`. For bricked or fresh units only.
 
