@@ -8,7 +8,7 @@ A static, browser-based USB flasher for the Edgerun exoskeleton controller (ESP3
 
 **No firmware is hosted here.** The `.bin` images are not in the repo and not on the page; `.gitignore` blocks `*.bin`. Images are sent to the client directly, and the client picks the file from their own PC in the page. This is deliberate - the repo and Pages site are public, so hosting firmware would expose it. (Earlier commits did contain images before this change; they remain in git history. There was no history rewrite.)
 
-The flasher drives `esptool-js` directly (vendored, pinned) so the page owns the whole flow: a custom progress bar, an in-page logs/serial console, and a device-info readout (chip, revision, MAC, flash size). It used to use the `esp-web-tools` web component; that closed modal was replaced so we control the UI.
+The flasher drives `esptool-js` directly (vendored, pinned) so the page owns the whole flow: a custom progress bar, an in-page logs/serial console, a device-info readout (chip, revision, MAC, flash size), a Reset button (reboot the board on demand), and auto-reset into the bootloader on connect (no BOOT button). It used to use the `esp-web-tools` web component; that closed modal was replaced so we control the UI.
 
 ## File layout
 

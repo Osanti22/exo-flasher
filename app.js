@@ -24,6 +24,8 @@ const FLASH_OFFSET = 0;      // merged image is written whole at 0 (bootloader..
 // The "IMU LH up" lines the firmware prints on a good boot. Success is one of these.
 const IMU_OK = "IMU LH up";
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -43,7 +45,7 @@ const $ = (id) => document.getElementById(id);
 const els = {};
 [
   "unsupported", "app", "statusPill",
-  "connectBtn", "disconnectBtn",
+  "connectBtn", "disconnectBtn", "resetBtn",
   "deviceInfo", "diChip", "diRev", "diMac", "diFlash", "diFeatures",
   "fileInput", "fileDrop", "fileMeta",
   "flashBtn", "monitorBtn",
@@ -155,6 +157,7 @@ async function connect() {
     connected = true;
     setStatus("Connected", "ok");
     els.disconnectBtn.hidden = false;
+    els.resetBtn.hidden = false;
     els.connectBtn.textContent = "Reconnect";
     updateFlashEnabled();
   } else {
@@ -257,8 +260,9 @@ async function openMonitor() {
   transport = null;
   els.connectBtn.textContent = "Connect";
   els.flashBtn.textContent = "Flash";
-  els.disconnectBtn.hidden = true;
   els.deviceInfo.hidden = true;
+  els.disconnectBtn.hidden = false;   // let the user stop the monitor
+  els.resetBtn.hidden = false;        // reset stays available while watching
   updateFlashEnabled();
 
   try {
@@ -309,6 +313,38 @@ async function stopMonitor() {
 }
 
 // ---------------------------------------------------------------------------
+// Reset the board (reboot into the app)
+// ---------------------------------------------------------------------------
+
+// Pulse the reset line (RTS) on our raw serial port to reboot into the app -
+// the same "Hard resetting via RTS pin" esptool uses. Works on the native
+// USB-Serial-JTAG and on UART bridges. DTR stays low so the chip runs the app
+// (not download mode).
+async function pulseReset() {
+  await port.setSignals({ dataTerminalReady: false, requestToSend: true });  // hold in reset
+  await sleep(120);
+  await port.setSignals({ dataTerminalReady: false, requestToSend: false }); // release -> boots app
+}
+
+async function resetBoard() {
+  if (flashing) return;
+  if (monitoring) {
+    // The serial monitor owns the port: pulse reset and keep streaming the boot log.
+    logLine("Resetting board (RTS pulse)...", "dim");
+    els.logBadge.hidden = true;
+    try { await pulseReset(); } catch (e) { logLine("Reset failed: " + (e.message || e), "err"); }
+    return;
+  }
+  if (esploader) {
+    // Still connected to the bootloader: hard reset into the app and open the
+    // serial monitor so the boot log is visible.
+    await openMonitor();
+    return;
+  }
+  logLine("Connect to a board first, then Reset.", "warn");
+}
+
+// ---------------------------------------------------------------------------
 // Disconnect / cleanup
 // ---------------------------------------------------------------------------
 async function disconnect() {
@@ -327,6 +363,7 @@ async function hardCleanup() {
   port = null;
   els.deviceInfo.hidden = true;
   els.disconnectBtn.hidden = true;
+  els.resetBtn.hidden = true;
   els.connectBtn.textContent = "Connect";
   els.flashBtn.textContent = "Flash";
   els.monitorBtn.hidden = true;
@@ -357,6 +394,7 @@ function init() {
 
   els.connectBtn.addEventListener("click", connect);
   els.disconnectBtn.addEventListener("click", disconnect);
+  els.resetBtn.addEventListener("click", resetBoard);
   els.flashBtn.addEventListener("click", flash);
   els.monitorBtn.addEventListener("click", openMonitor);
 
